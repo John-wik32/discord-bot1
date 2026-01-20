@@ -7,30 +7,54 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Bot Command Center</h1>
-        
-        <div class="card">
-            <input type="password" id="adminPassword" placeholder="Admin Password (123test)">
+    <!-- LOGIN SCREEN -->
+    <div id="login-container" class="card-container">
+        <div class="card login-card">
+            <h1>🤖 Bot Command Center</h1>
+            <p style="color: #888;">Enter your admin password to continue</p>
+            <input type="password" id="adminPassword" placeholder="Admin Password">
             <button onclick="fetchChannels()">Connect to Bot</button>
         </div>
+    </div>
 
+    <!-- DASHBOARD -->
+    <div id="dashboard-container" class="hidden">
+        <div class="dashboard-header">
+            <h1>🤖 Bot Command Center</h1>
+            <button class="logout-btn" onclick="location.reload()">Logout</button>
+        </div>
+
+        <!-- SEND POST CARD -->
         <div class="card">
-            <label>1. Select Channel</label>
-            <select id="channelSelect"><option value="">-- No Channels --</option></select>
+            <h2>Send / Schedule Post</h2>
+            
+            <label>Select Channel *</label>
+            <select id="channelSelect">
+                <option value="">-- Loading Channels --</option>
+            </select>
 
-            <label>2. Message Content</label>
-            <textarea id="postContent" rows="4"></textarea>
+            <label>Message Content</label>
+            <textarea id="postContent" rows="4" placeholder="Enter your message here..."></textarea>
 
-            <label>3. Add Media (Optional)</label>
-            <input type="file" id="mediaFile">
+            <label>Add Media (Video/Image/File)</label>
+            <input type="file" id="mediaFile" onchange="previewMedia()">
+            <div id="preview-container"></div>
 
-            <label>4. Schedule (Leave blank for instant)</label>
+            <label>Schedule (Optional - Leave blank for instant)</label>
             <input type="datetime-local" id="scheduleTime">
 
-            <button id="sendBtn" onclick="sendPost()">🚀 Send / Schedule Post</button>
+            <button id="sendBtn" onclick="sendPost()" class="primary-btn">🚀 Send / Schedule Post</button>
+        </div>
+
+        <!-- SCHEDULED POSTS CARD -->
+        <div class="card">
+            <h2>Scheduled Posts</h2>
+            <div id="scheduled-posts">
+                <p style="color: #888;">Loading...</p>
+            </div>
         </div>
     </div>
+
     <script src="script.js"></script>
 </body>
 </html>
