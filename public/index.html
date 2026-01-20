@@ -3,55 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Staff Content Dashboard</title>
+    <title>Discord Bot Dashboard</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-    <div id="login-container">
-        <div class="card">
-            <h2>Staff Login</h2>
-            <input type="password" id="password-input" placeholder="Enter Shared Password">
-            <button onclick="handleLogin()">Access Dashboard</button>
-            <p id="login-error" class="error"></p>
+    <div class="container">
+        <h1>Bot Control Panel</h1>
+        
+        <div class="auth-section">
+            <input type="password" id="adminPassword" placeholder="Enter Admin Password (123test)">
+            <button onclick="fetchChannels()">Login & Load Channels</button>
         </div>
-    </div>
 
-    <div id="dashboard-container" class="hidden">
-        <header>
-            <h1>Discord Content Poster</h1>
-            <button onclick="logout()" class="secondary-btn">Logout</button>
-        </header>
+        <hr>
 
-        <main>
-            <div class="card">
-                <h3>1. Select Channel</h3>
-                <select id="channel-select">
-                    <option value="" disabled selected>Loading channels...</option>
-                </select>
-                <button onclick="fetchChannels()" class="refresh-btn">↻ Refresh List</button>
-            </div>
-
-            <div class="card">
-                <h3>2. Create Post</h3>
-                <input type="text" id="post-title" placeholder="Post Title / Caption (Optional)">
-                
-                <div class="file-drop-area" id="drop-area">
-                    <p>Drag & Drop Image/Video here or Click</p>
-                    <input type="file" id="file-input" accept="image/*,video/*">
-                </div>
-                
-                <div id="preview-container" class="hidden">
-                    <p>Preview:</p>
-                    <img id="img-preview" class="hidden">
-                    <video id="video-preview" controls class="hidden"></video>
-                    <button onclick="clearFile()" class="clear-btn">Remove File</button>
-                </div>
-            </div>
-
-            <button id="send-btn" onclick="sendPost()">🚀 Send to Discord</button>
-            <p id="status-msg"></p>
-        </main>
+        <div class="post-section">
+            <select id="channelSelect">
+                <option value="">-- Select a Channel --</option>
+            </select>
+            <textarea id="postContent" placeholder="What's on your mind?"></textarea>
+            <input type="file" id="mediaFile">
+            <button onclick="sendPost()">Send to Discord</button>
+        </div>
     </div>
 
     <script src="script.js"></script>
