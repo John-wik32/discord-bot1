@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discord Bot Manager</title>
+    <title>Discord Bot Manager Pro</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <!-- LOGIN SCREEN -->
     <div id="login-container" class="card-container">
         <div class="card login-card">
-            <h1>🤖 Bot Command Center</h1>
-            <p style="color: #888;">Enter your admin password to continue</p>
+            <h1>🤖 Bot Command Center Pro</h1>
+            <p style="color: #888;">Enter your admin password</p>
             <input type="password" id="adminPassword" placeholder="Admin Password">
             <button onclick="fetchChannels()">Connect to Bot</button>
         </div>
@@ -20,41 +20,227 @@
     <!-- DASHBOARD -->
     <div id="dashboard-container" class="hidden">
         <div class="dashboard-header">
-            <h1>🤖 Bot Command Center</h1>
+            <h1>🤖 Bot Command Center Pro</h1>
             <button class="logout-btn" onclick="location.reload()">Logout</button>
         </div>
 
-        <!-- SEND POST CARD -->
-        <div class="card">
-            <h2>Send / Schedule Post</h2>
-            
-            <label>Select Channel *</label>
-            <select id="channelSelect">
-                <option value="">-- Loading Channels --</option>
-            </select>
-
-            <label>Message Content</label>
-            <textarea id="postContent" rows="4" placeholder="Enter your message here..."></textarea>
-
-            <label>Add Media (Video/Image/File)</label>
-            <input type="file" id="mediaFile" onchange="previewMedia()">
-            <div id="preview-container"></div>
-
-            <label>Schedule (Optional - Leave blank for instant)</label>
-            <input type="datetime-local" id="scheduleTime">
-
-            <button id="sendBtn" onclick="sendPost()" class="primary-btn">🚀 Send / Schedule Post</button>
+        <!-- TAB NAVIGATION -->
+        <div class="tab-buttons">
+            <button class="tab-btn active" onclick="switchTab('send')">📤 Send</button>
+            <button class="tab-btn" onclick="switchTab('schedule')">⏰ Schedule</button>
+            <button class="tab-btn" onclick="switchTab('queue')">📋 Queue</button>
+            <button class="tab-btn" onclick="switchTab('library')">📚 Library</button>
+            <button class="tab-btn" onclick="switchTab('templates')">🎨 Templates</button>
+            <button class="tab-btn" onclick="switchTab('scheduled')">✅ Scheduled</button>
+            <button class="tab-btn" onclick="switchTab('history')">📊 History</button>
+            <button class="tab-btn" onclick="switchTab('test')">🧪 Test Mode</button>
         </div>
 
-        <!-- SCHEDULED POSTS CARD -->
-        <div class="card">
-            <h2>Scheduled Posts</h2>
-            <div id="scheduled-posts">
-                <p style="color: #888;">Loading...</p>
+        <!-- SEND TAB -->
+        <div id="send-tab" class="tab-content">
+            <div class="card">
+                <h2>📤 Send Post Now</h2>
+                
+                <label>Select Channel *</label>
+                <select id="channelSelect" onchange="setGuildFromChannel()">
+                    <option value="">-- Loading Channels --</option>
+                </select>
+
+                <label>Video URL (YouTube, Twitch, etc.)</label>
+                <input type="text" id="videoUrl" placeholder="https://youtube.com/watch?v=...">
+
+                <label>Message Content</label>
+                <textarea id="postContent" rows="4" placeholder="Enter your message..."></textarea>
+
+                <label>Add Media (Optional)</label>
+                <input type="file" id="mediaFile" onchange="previewMedia()">
+                <div id="preview-container"></div>
+
+                <button id="sendBtn" onclick="sendPost()" class="primary-btn">🚀 Send Now</button>
+            </div>
+        </div>
+
+        <!-- SCHEDULE TAB -->
+        <div id="schedule-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>⏰ Schedule Post</h2>
+                
+                <label>Select Channel *</label>
+                <select id="channelSelect" onchange="setGuildFromChannel()">
+                    <option value="">-- Loading Channels --</option>
+                </select>
+
+                <label>Video URL (Optional)</label>
+                <input type="text" id="videoUrl" placeholder="https://youtube.com/watch?v=...">
+
+                <label>Message Content</label>
+                <textarea id="postContent" rows="4" placeholder="Enter your message..."></textarea>
+
+                <label>Add Media (Optional)</label>
+                <input type="file" id="mediaFile" onchange="previewMedia()">
+                <div id="preview-container"></div>
+
+                <label>Schedule Time (Same day or later) *</label>
+                <input type="datetime-local" id="scheduleTime">
+
+                <button onclick="sendPost()" class="primary-btn">📅 Schedule Post</button>
+            </div>
+        </div>
+
+        <!-- QUEUE TAB -->
+        <div id="queue-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>📋 Video Queue</h2>
+                <p style="color: #888;">Videos will auto-post in sequence</p>
+                
+                <label>Select Channel *</label>
+                <select id="channelSelect" onchange="setGuildFromChannel()">
+                    <option value="">-- Loading Channels --</option>
+                </select>
+
+                <label>Video Title</label>
+                <input type="text" id="queueTitle" placeholder="Video title...">
+
+                <label>Custom Message</label>
+                <textarea id="queueMessage" rows="3" placeholder="Optional message..."></textarea>
+
+                <label>Video URL</label>
+                <input type="text" id="queueVideoUrl" placeholder="https://youtube.com/...">
+
+                <label>Or Upload Video</label>
+                <input type="file" id="queueMediaFile">
+
+                <button onclick="addToQueue()" class="primary-btn">➕ Add to Queue</button>
+
+                <h3 style="margin-top: 30px;">Queue Items</h3>
+                <div id="queue-container">
+                    <p style="color: #888;">Loading...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- LIBRARY TAB -->
+        <div id="library-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>📚 Video Library</h2>
+                <p style="color: #888;">Save videos for quick reuse</p>
+
+                <label>Video Title *</label>
+                <input type="text" id="libTitle" placeholder="My awesome video">
+
+                <label>Category</label>
+                <input type="text" id="libCategory" placeholder="Memes, Tutorials, etc.">
+
+                <label>Video URL</label>
+                <input type="text" id="libVideoUrl" placeholder="https://youtube.com/...">
+
+                <label>Or Upload Video *</label>
+                <input type="file" id="libMediaFile">
+
+                <button onclick="saveToLibrary()" class="primary-btn">💾 Save to Library</button>
+
+                <h3 style="margin-top: 30px;">Your Library</h3>
+                <div id="library-container" class="library-grid">
+                    <p style="color: #888;">Loading...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- TEMPLATES TAB -->
+        <div id="templates-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>🎨 Message Templates</h2>
+                <p style="color: #888;">Create reusable message templates</p>
+
+                <label>Template Name *</label>
+                <input type="text" id="tempName" placeholder="e.g., Daily Meme">
+
+                <label>Message Before Video</label>
+                <textarea id="tempBefore" rows="3" placeholder="🤣 Meme of the day:"></textarea>
+
+                <label>Message After Video</label>
+                <textarea id="tempAfter" rows="3" placeholder="Drop your thoughts below!"></textarea>
+
+                <button onclick="saveTemplate()" class="primary-btn">💾 Save Template</button>
+
+                <h3 style="margin-top: 30px;">Your Templates</h3>
+                <div id="templates-container">
+                    <p style="color: #888;">Loading...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- SCHEDULED POSTS TAB -->
+        <div id="scheduled-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>✅ Scheduled Posts</h2>
+                <p style="color: #888;">View and manage upcoming posts</p>
+                <div id="scheduled-posts">
+                    <p style="color: #888;">Loading...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- HISTORY TAB -->
+        <div id="history-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>📊 Post History</h2>
+                <p style="color: #888;">Recent posts (last 50)</p>
+                <div id="history-container">
+                    <p style="color: #888;">Loading...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- TEST MODE TAB -->
+        <div id="test-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>🧪 Test Mode</h2>
+                <p style="color: #888; margin-bottom: 20px;">Quick test: Pick channel, add title, send immediately (no scheduling)</p>
+                
+                <label>Select Channel *</label>
+                <select id="testChannelSelect">
+                    <option value="">-- Loading Channels --</option>
+                </select>
+
+                <label>Video Title / Message</label>
+                <input type="text" id="testVideoTitle" placeholder="Test message...">
+
+                <label>Media File</label>
+                <input type="file" id="testMediaFile" onchange="testPreviewMedia()">
+                <div id="testPreview"></div>
+
+                <button onclick="testSend()" class="primary-btn">🚀 Send Test</button>
             </div>
         </div>
     </div>
 
     <script src="script.js"></script>
+    <script>
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.add('hidden');
+            });
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            document.getElementById(tabName + '-tab').classList.remove('hidden');
+            event.target.classList.add('active');
+            
+            // Reload channel list for new tab
+            if (tabName === 'send' || tabName === 'schedule' || tabName === 'queue' || tabName === 'test') {
+                const sel = document.getElementById(tabName === 'test' ? 'testChannelSelect' : 'channelSelect');
+                if (sel.options.length === 1) {
+                    fetch(`${API_BASE}/api/channels`, {
+                        headers: { 'Authorization': currentPassword }
+                    }).then(r => r.json()).then(channels => {
+                        sel.innerHTML = '<option value="">-- Select Channel --</option>' + 
+                            channels.map(c => `<option value="${c.id}" data-guild="${c.guildId}">${c.name}</option>`).join('');
+                    });
+                }
+            }
+        }
+    </script>
 </body>
 </html>
