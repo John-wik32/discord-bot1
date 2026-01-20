@@ -1,19 +1,16 @@
-# Use Node.js version 22
 FROM node:22-slim
 
-# Create the app directory
 WORKDIR /app
 
-# Copy package.json and install dependencies
-# We don't need package-lock.json for this to work
+# Copy package info and install
 COPY package.json ./
 RUN npm install
 
-# Copy all your project files (index.js, public folder, etc.)
+# Copy everything else (including your public folder)
 COPY . .
 
-# Tell Koyeb your app uses port 8000
+# Expose the port used in index.js
 EXPOSE 8000
 
-# The command to start your bot and dashboard
+# Start the application
 CMD ["node", "index.js"]
