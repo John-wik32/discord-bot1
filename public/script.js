@@ -2,67 +2,44 @@ const API_BASE = window.location.origin;
 
 async function fetchChannels() {
     const password = document.getElementById('adminPassword').value;
-    
-    if (!password) {
-        alert("Please enter the password: 123test");
-        return;
-    }
-
     try {
-        const response = await fetch(`${API_BASE}/api/channels`, {
+        const res = await fetch(`${API_BASE}/api/channels`, {
             headers: { 'Authorization': password }
         });
-
-        if (!response.ok) {
-            throw new Error("Invalid Password or Server Error");
-        }
-
-        const channels = await response.json();
+        if (!res.ok) throw new Error("Check Password");
+        const channels = await res.json();
         const select = document.getElementById('channelSelect');
-        select.innerHTML = '<option value="">-- Select a Channel --</option>';
-
-        channels.forEach(ch => {
-            const opt = document.createElement('option');
-            opt.value = ch.id;
-            opt.textContent = ch.name;
-            select.appendChild(opt);
-        });
-
-        alert("Logged in! Channels loaded.");
-    } catch (err) {
-        alert(err.message);
-    }
+        select.innerHTML = channels.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        alert("Connected!");
+    } catch (err) { alert(err.message); }
 }
 
 async function sendPost() {
     const password = document.getElementById('adminPassword').value;
     const channelId = document.getElementById('channelSelect').value;
     const content = document.getElementById('postContent').value;
+    const scheduleTime = document.getElementById('scheduleTime').value;
     const fileInput = document.getElementById('mediaFile');
 
-    if (!channelId) return alert("Select a channel first!");
+    if (!channelId) return alert("Select a channel!");
 
     const formData = new FormData();
     formData.append('channelId', channelId);
     formData.append('postTitle', content);
-    if (fileInput.files[0]) {
-        formData.append('mediaFile', fileInput.files[0]);
-    }
+    if (scheduleTime) formData.append('scheduleTime', scheduleTime);
+    if (fileInput.files[0]) formData.append('mediaFile', fileInput.files[0]);
 
     try {
-        const response = await fetch(`${API_BASE}/api/post`, {
+        const res = await fetch(`${API_BASE}/api/post`, {
             method: 'POST',
             headers: { 'Authorization': password },
             body: formData
         });
-
-        if (response.ok) {
-            alert("Post sent successfully!");
-            document.getElementById('postContent').value = '';
+        const result = await res.json();
+        if (res.ok) {
+            alert(result.scheduled ? "✅ Post Scheduled!" : "✅ Post Sent Now!");
         } else {
-            alert("Failed to send post.");
+            alert("Error: " + result.error);
         }
-    } catch (err) {
-        alert("Error: " + err.message);
-    }
+    } catch (err) { alert("Server Error"); }
 }
