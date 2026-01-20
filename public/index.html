@@ -3,30 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discord Bot Dashboard</title>
+    <title>Discord Bot Manager</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>Bot Control Panel</h1>
+        <h1>Bot Command Center</h1>
         
-        <div class="auth-section">
-            <input type="password" id="adminPassword" placeholder="Enter Admin Password (123test)">
-            <button onclick="fetchChannels()">Login & Load Channels</button>
+        <div class="card">
+            <input type="password" id="adminPassword" placeholder="Admin Password (123test)">
+            <button onclick="fetchChannels()">Connect to Bot</button>
         </div>
 
-        <hr>
+        <div class="card">
+            <label>1. Select Channel</label>
+            <select id="channelSelect"><option value="">-- No Channels --</option></select>
 
-        <div class="post-section">
-            <select id="channelSelect">
-                <option value="">-- Select a Channel --</option>
-            </select>
-            <textarea id="postContent" placeholder="What's on your mind?"></textarea>
+            <label>2. Message Content</label>
+            <textarea id="postContent" rows="4"></textarea>
+
+            <label>3. Add Media (Optional)</label>
             <input type="file" id="mediaFile">
-            <button onclick="sendPost()">Send to Discord</button>
+
+            <label>4. Schedule (Leave blank for instant)</label>
+            <input type="datetime-local" id="scheduleTime">
+
+            <button id="sendBtn" onclick="sendPost()">🚀 Send / Schedule Post</button>
         </div>
     </div>
-
     <script src="script.js"></script>
 </body>
 </html>
