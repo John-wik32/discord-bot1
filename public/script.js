@@ -1,25 +1,20 @@
-// --- CONFIG ---
-// This line automatically finds your Koyeb URL so you don't have to hardcode it
-const API_BASE = window.location.origin; 
+const API_BASE = window.location.origin;
 
 async function fetchChannels() {
     const password = document.getElementById('adminPassword').value;
     
     if (!password) {
-        alert("Please enter the Admin Password first!");
+        alert("Please enter the password: 123test");
         return;
     }
 
     try {
         const response = await fetch(`${API_BASE}/api/channels`, {
-            headers: {
-                'Authorization': password
-            }
+            headers: { 'Authorization': password }
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to fetch');
+            throw new Error("Invalid Password or Server Error");
         }
 
         const channels = await response.json();
@@ -33,11 +28,41 @@ async function fetchChannels() {
             select.appendChild(opt);
         });
 
-        alert("Channels loaded successfully!");
+        alert("Logged in! Channels loaded.");
     } catch (err) {
-        console.error("Error details:", err);
-        alert("Error: " + err.message);
+        alert(err.message);
     }
 }
 
-// Make sure your "Load Channels" button calls fetchChannels()
+async function sendPost() {
+    const password = document.getElementById('adminPassword').value;
+    const channelId = document.getElementById('channelSelect').value;
+    const content = document.getElementById('postContent').value;
+    const fileInput = document.getElementById('mediaFile');
+
+    if (!channelId) return alert("Select a channel first!");
+
+    const formData = new FormData();
+    formData.append('channelId', channelId);
+    formData.append('postTitle', content);
+    if (fileInput.files[0]) {
+        formData.append('mediaFile', fileInput.files[0]);
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/post`, {
+            method: 'POST',
+            headers: { 'Authorization': password },
+            body: formData
+        });
+
+        if (response.ok) {
+            alert("Post sent successfully!");
+            document.getElementById('postContent').value = '';
+        } else {
+            alert("Failed to send post.");
+        }
+    } catch (err) {
+        alert("Error: " + err.message);
+    }
+}
