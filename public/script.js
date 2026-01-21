@@ -1,54 +1,189 @@
 const API = location.origin;
-let auth = '';
+let AUTH = "";
 
+/* ---------- LOGIN ---------- */
 async function login() {
-  auth = pw.value;
-  const r = await fetch(`${API}/api/channels`, {
-    headers: { Authorization: auth }
-  });
-  if (!r.ok) return alert('Wrong password');
+  AUTH = document.getElementById("pw").value;
+  if (!AUTH) return alert("Enter admin password");
 
-  const ch = await r.json();
-  [sendChannel, scheduleChannel, testChannel].forEach(s =>
-    s.innerHTML = ch.map(c => `<option value="${c.id}">${c.name}</option>`)
+  try {
+    const res = await fetch(`${API}/api/channels`, {
+      headers: { Authorization: AUTH }
+    });
+
+    if (!res.ok) throw new Error("Invalid password");
+
+    const channels = await res.json();
+
+    ["sendChannel", "scheduleChannel", "testChannel"].forEach(id => {
+      const select = document.getElementById(id);
+      select.innerHTML = channels
+        .map(c => `<option value="${c.id}">${c.name}</option>`)
+        .join("");
+    });
+
+    document.getElementById("login").classList.add("hidden");
+    document.getElementById("app").classList.remove("hidden");
+
+    loadScheduled();
+    loadHistory();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+/* ---------- TABS ---------- */
+function tab(name) {
+  document.querySelectorAll(".tab").forEach(t =>
+    t.classList.add("hidden")
+  );
+  document.querySelectorAll(".tabs button").forEach(b =>
+    b.classList.remove("active")
   );
 
-  login.style.display = 'none';
-  app.classList.remove('hidden');
-  load();
+  document.getElementById(name).classList.remove("hidden");
+  event.target.classList.add("active");
 }
 
-function tab(t) {
-  ['send','schedule','test','scheduled','history']
-    .forEach(i => document.getElementById(i).classList.add('hidden'));
-  document.getElementById(t).classList.remove('hidden');
-}
-
+/* ---------- SEND NOW ---------- */
 async function send() {
-  const f = new FormData();
-  f.append('channelId', sendChannel.value);
-  f.append('postTitle', sendText.value);
-  [...sendFiles.files].forEach(x => f.append('mediaFile', x));
-  await fetch(`${API}/api/post`, { method:'POST', headers:{Authorization:auth}, body:f });
+  if (!sendChannel.value) return alert("Select channel");
+
+  const fd = new FormData();
+  fd.append("channelId", sendChannel.value);
+  fd.append("postTitle", sendText.value);
+
+  [...sendFiles.files].forEach(f =>
+    fd.append("mediaFile", f)
+  );
+
+  try {
+    const res = await fetch(`${API}/api/post`, {
+      method: "POST",
+      headers: { Authorization: AUTH },
+      body: fd
+    });
+
+    if (!res.ok) throw new Error("Failed to send");
+
+    alert("Sent!");
+    sendText.value = "";
+    sendFiles.value = "";
+    loadHistory();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
+/* ---------- SCHEDULE ---------- */
 async function schedule() {
-  const f = new FormData();
-  f.append('channelId', scheduleChannel.value);
-  f.append('postTitle', scheduleText.value);
-  f.append('scheduleTime', scheduleTime.value);
-  [...scheduleFiles.files].forEach(x => f.append('mediaFile', x));
-  await fetch(`${API}/api/post`, { method:'POST', headers:{Authorization:auth}, body:f });
+  if (!scheduleChannel.value) return alert("Select channel");
+  if (!scheduleTime.value) return alert("Pick date & time");
+
+  const fd = new FormData();
+  fd.append("channelId", scheduleChannel.value);
+  fd.append("postTitle", scheduleText.value);
+  fd.append("scheduleTime", scheduleTime.value);
+
+  [...scheduleFiles.files].forEach(f =>
+    fd.append("mediaFile", f)
+  );
+
+  try {
+    const res = await fetch(`${API}/api/post`, {
+      method: "POST",
+      headers: { Authorization: AUTH },
+      body: fd
+    });
+
+    if (!res.ok) throw new Error("Failed to schedule");
+
+    alert("Scheduled!");
+    scheduleText.value = "";
+    scheduleFiles.value = "";
+    scheduleTime.value = "";
+    loadScheduled();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
+/* ---------- TEST ---------- */
 async function test() {
-  const f = new FormData();
-  f.append('channelId', testChannel.value);
-  [...testFiles.files].forEach(x => f.append('mediaFile', x));
-  await fetch(`${API}/api/post`, { method:'POST', headers:{Authorization:auth}, body:f });
+  if (!testChannel.value) return alert("Select channel");
+
+  const fd = new FormData();
+  fd.append("channelId", testChannel.value);
+
+  [...testFiles.files].forEach(f =>
+    fd.append("mediaFile", f)
+  );
+
+  try {
+    const res = await fetch(`${API}/api/post`, {
+      method: "POST",
+      headers: { Authorization: AUTH },
+      body: fd
+    });
+
+    if (!res.ok) throw new Error("Test failed");
+
+    alert("Test sent!");
+    testFiles.value = "";
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
-async function load() {
-  scheduled.innerHTML = JSON.stringify(await (await fetch(`${API}/api/scheduled`, { headers:{Authorization:auth} })).json(), null, 2);
-  history.innerHTML = JSON.stringify(await (await fetch(`${API}/api/history`, { headers:{Authorization:auth} })).json(), null, 2);
+/* ---------- LOAD SCHEDULED ---------- */
+async function loadScheduled() {
+  const res = await fetch(`${API}/api/scheduled`, {
+    headers: { Authorization: AUTH }
+  });
+  const data = await res.json();
+
+  const box = document.getElementById("scheduled");
+  box.innerHTML = "<h2>📋 Scheduled</h2>";
+
+  if (!data.length) {
+    box.innerHTML += "<p>No scheduled posts</p>";
+    return;
+  }
+
+  data.forEach(p => {
+    box.innerHTML += `
+      <div class="list-item">
+        <strong>${p.postTitle || "(No message)"}</strong>
+        <small>${new Date(p.time).toLocaleString()}</small>
+      </div>
+    `;
+  });
+}
+
+/* ---------- LOAD HISTORY ---------- */
+async function loadHistory() {
+  const res = await fetch(`${API}/api/history`, {
+    headers: { Authorization: AUTH }
+  });
+  const data = await res.json();
+
+  const box = document.getElementById("history");
+  box.innerHTML = "<h2>📜 History</h2>";
+
+  if (!data.length) {
+    box.innerHTML += "<p>No history</p>";
+    return;
+  }
+
+  data
+    .slice()
+    .reverse()
+    .forEach(p => {
+      box.innerHTML += `
+        <div class="list-item">
+          <strong>${p.title || "(No message)"}</strong>
+          <small>${new Date(p.time).toLocaleString()}</small>
+        </div>
+      `;
+    });
 }
