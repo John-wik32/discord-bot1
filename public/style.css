@@ -1,24 +1,234 @@
+:root {
+    --bg: #2b2d31;
+    --card: #313338;
+    --text: #f2f3f5;
+    --text-muted: #949ba4;
+    --primary: #5865F2;
+    --hover: #4752c4;
+    --danger: #DA373C;
+    --success: #57F287;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
 body {
-  background: #1e1f22;
-  color: white;
-  font-family: Arial;
-  padding: 30px;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    min-height: 100vh;
+    padding: 20px;
 }
 
-.hidden {
-  display: none;
+.hidden { display: none !important; }
+
+/* LOGIN */
+.card-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
 }
 
-input, textarea, select, button {
-  width: 100%;
-  padding: 10px;
-  margin-top: 10px;
-  background: #2b2d31;
-  border: none;
-  color: white;
+.login-card {
+    max-width: 400px;
+    text-align: center;
 }
 
+.login-card h1 {
+    margin-bottom: 10px;
+    font-size: 2em;
+}
+
+/* DASHBOARD */
+#dashboard-container {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid var(--card);
+}
+
+.dashboard-header h1 {
+    font-size: 1.8em;
+}
+
+/* TAB NAVIGATION */
+.tab-buttons {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 25px;
+    flex-wrap: wrap;
+    border-bottom: 2px solid var(--card);
+    padding-bottom: 15px;
+}
+
+.tab-btn {
+    background-color: transparent;
+    color: var(--text-muted);
+    border: none;
+    padding: 10px 15px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+    border-bottom: 3px solid transparent;
+}
+
+.tab-btn:hover {
+    color: var(--text);
+}
+
+.tab-btn.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+/* CARDS */
+.card {
+    background-color: var(--card);
+    padding: 25px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.card h2 {
+    margin-bottom: 10px;
+    font-size: 1.3em;
+}
+
+label {
+    display: block;
+    margin-top: 15px;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* INPUTS */
+input, select, textarea {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+    border: 1px solid #404249;
+    background-color: #1e1f22;
+    color: white;
+    font-family: inherit;
+    font-size: 1em;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.1);
+}
+
+textarea {
+    resize: vertical;
+}
+
+/* BUTTONS */
 button {
-  background: #5865f2;
-  cursor: pointer;
+    background-color: var(--primary);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    width: 100%;
+    transition: all 0.2s;
+    margin-top: 15px;
+}
+
+button:hover {
+    background-color: var(--hover);
+}
+
+.logout-btn {
+    background-color: var(--danger);
+    width: auto;
+    padding: 10px 15px;
+}
+
+.delete-btn {
+    background-color: var(--danger);
+    width: auto;
+    padding: 8px 12px;
+    margin-left: 10px;
+}
+
+/* ITEMS */
+.scheduled-item, .history-item {
+    background-color: #1e1f22;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.scheduled-item {
+    border-left: 3px solid var(--primary);
+}
+
+.history-item {
+    border-left: 3px solid var(--success);
+}
+
+.scheduled-item div, .history-item div {
+    flex: 1;
+}
+
+.scheduled-item strong, .history-item strong {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.scheduled-item p, .history-item p {
+    margin: 5px 0;
+    color: var(--text-muted);
+}
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+    body {
+        padding: 10px;
+    }
+
+    .card {
+        padding: 15px;
+    }
+
+    .tab-buttons {
+        gap: 5px;
+        overflow-x: auto;
+    }
+
+    .tab-btn {
+        padding: 8px 12px;
+        font-size: 0.9em;
+        white-space: nowrap;
+    }
+
+    .scheduled-item, .history-item {
+        flex-direction: column;
+    }
+
+    .scheduled-item .delete-btn, .history-item .delete-btn {
+        margin-left: 0;
+        margin-top: 10px;
+        width: 100%;
+    }
 }
