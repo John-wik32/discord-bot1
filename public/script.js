@@ -24,6 +24,7 @@ async function fetchChannels() {
         let channels = await res.json();
         console.log(`Got ${channels.length} channels`);
         
+        // Retry logic for empty channels
         if (!channels || channels.length === 0) {
             console.log('No channels found, retrying in 2 seconds...');
             await new Promise(resolve => setTimeout(resolve, 2000));
@@ -31,7 +32,6 @@ async function fetchChannels() {
                 headers: { 'Authorization': password }
             });
             channels = await retryRes.json();
-            console.log(`Retry got ${channels.length} channels`);
         }
 
         currentPassword = password;
@@ -42,6 +42,7 @@ async function fetchChannels() {
         document.getElementById('login-container').classList.add('hidden');
         document.getElementById('dashboard-container').classList.remove('hidden');
         
+        // Load initial data
         loadTemplates();
         loadLibrary();
         loadScheduled();
@@ -50,7 +51,6 @@ async function fetchChannels() {
         loadRecurringPosts();
         loadSuggestions();
         
-        alert(`✓ Connected! Found ${channels.length} channels`);
     } catch (err) {
         console.error('Auth error:', err);
         alert('Error: ' + err.message);
@@ -58,15 +58,21 @@ async function fetchChannels() {
 }
 
 function updateAllChannelSelects(channels) {
+    // Select all channel dropdowns
     const selects = document.querySelectorAll('select[id$="ChannelSelect"], select[id="testChannelSelect"]');
+    
     selects.forEach(select => {
+        // preserve current selection if possible, otherwise reset
+        const currentVal = select.value;
         select.innerHTML = '<option value="">-- Select Channel --</option>' + 
             channels.map(c => `<option value="${c.id}" data-guild="${c.guildId}">${c.name}</option>`).join('');
+        if (currentVal) select.value = currentVal;
     });
 }
 
 function setGuildFromChannel(selectId = 'channelSelect') {
     const select = document.getElementById(selectId);
+    if (!select) return;
     const option = select.options[select.selectedIndex];
     selectedGuildId = option.dataset.guild || '';
     if (selectId.includes('queue')) {
@@ -130,7 +136,6 @@ async function schedulePost() {
     const minTime = new Date(now.getTime() + 60000); // 1 minute from now
 
     if (scheduledDate < minTime) {
-        const timeLeft = Math.ceil((minTime - scheduledDate) / 1000 / 60);
         return alert(`Schedule time must be at least 1 minute in the future. Current time: ${now.toLocaleString()}`);
     }
 
@@ -406,10 +411,16 @@ async function loadSuggestions() {
         const res = await fetch(`${API_BASE}/api/suggestions`, {
             headers: { 'Authorization': currentPassword }
         });
-        const suggestions = await res.json();
+        let suggestions = await res.json();
         const container = document.getElementById('suggestions-container');
         
-        if (!suggestions || suggestions.length === 0) {
+        // FIX: Ensure it is an array
+        if (!Array.isArray(suggestions)) {
+            console.warn('Suggestions API returned non-array:', suggestions);
+            suggestions = [];
+        }
+
+        if (suggestions.length === 0) {
             container.innerHTML = '<p style="color: #888;">No suggestions yet. Be the first!</p>';
             return;
         }
@@ -426,6 +437,7 @@ async function loadSuggestions() {
         `).join('');
     } catch (err) {
         console.error('Suggestions load error:', err);
+        document.getElementById('suggestions-container').innerHTML = '<p style="color: #DA373C;">Error loading suggestions</p>';
     }
 }
 
