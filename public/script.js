@@ -47,7 +47,6 @@ function setGuildFromChannel() {
 async function sendPost() {
     const channelId = document.getElementById('channelSelect').value;
     const postTitle = document.getElementById('postContent').value;
-    const scheduleTime = document.getElementById('scheduleTime').value;
     const videoUrl = document.getElementById('videoUrl').value;
     const fileInput = document.getElementById('mediaFile');
 
@@ -57,7 +56,6 @@ async function sendPost() {
     const formData = new FormData();
     formData.append('channelId', channelId);
     formData.append('postTitle', postTitle);
-    if (scheduleTime) formData.append('scheduleTime', scheduleTime);
     if (videoUrl) formData.append('videoUrl', videoUrl);
     if (fileInput.files[0]) formData.append('mediaFile', fileInput.files[0]);
 
@@ -69,8 +67,48 @@ async function sendPost() {
         });
         const result = await res.json();
         if (res.ok) {
-            alert(result.scheduled ? '✓ Post Scheduled!' : '✓ Post Sent!');
+            alert('✓ Post Sent!');
             clearForm();
+        } else {
+            alert('Error: ' + result.error);
+        }
+    } catch (err) {
+        alert('Server error: ' + err.message);
+    }
+}
+
+async function schedulePost() {
+    const channelId = document.getElementById('scheduleChannelSelect').value;
+    const postTitle = document.getElementById('schedulePostContent').value;
+    const scheduleTime = document.getElementById('scheduleTime').value;
+    const videoUrl = document.getElementById('scheduleVideoUrl').value;
+    const fileInput = document.getElementById('scheduleMediaFile');
+
+    if (!channelId) return alert('Select a channel');
+    if (!scheduleTime) return alert('Set schedule time');
+    if (!postTitle && !fileInput.files[0] && !videoUrl) return alert('Add message, media, or URL');
+
+    const formData = new FormData();
+    formData.append('channelId', channelId);
+    formData.append('postTitle', postTitle);
+    formData.append('scheduleTime', scheduleTime);
+    if (videoUrl) formData.append('videoUrl', videoUrl);
+    if (fileInput.files[0]) formData.append('mediaFile', fileInput.files[0]);
+
+    try {
+        const res = await fetch(`${API_BASE}/api/post`, {
+            method: 'POST',
+            headers: { 'Authorization': currentPassword },
+            body: formData
+        });
+        const result = await res.json();
+        if (res.ok) {
+            alert('✓ Post Scheduled!');
+            document.getElementById('schedulePostContent').value = '';
+            document.getElementById('scheduleTime').value = '';
+            document.getElementById('scheduleVideoUrl').value = '';
+            document.getElementById('scheduleMediaFile').value = '';
+            document.getElementById('schedulePreview').innerHTML = '';
             loadScheduled();
         } else {
             alert('Error: ' + result.error);
@@ -362,10 +400,17 @@ async function loadScheduled() {
         const res = await fetch(`${API_BASE}/api/scheduled`, {
             headers: { 'Authorization': currentPassword }
         });
+        
+        if (!res.ok) {
+            console.error('Scheduled load error: HTTP', res.status);
+            document.getElementById('scheduled-posts').innerHTML = '<p style="color: #888;">Error loading scheduled posts</p>';
+            return;
+        }
+
         const tasks = await res.json();
         const container = document.getElementById('scheduled-posts');
         
-        if (tasks.length === 0) {
+        if (!Array.isArray(tasks) || tasks.length === 0) {
             container.innerHTML = '<p style="color: #888;">No scheduled posts</p>';
             return;
         }
@@ -373,12 +418,13 @@ async function loadScheduled() {
         container.innerHTML = tasks.map((task, idx) => `
             <div class="scheduled-item">
                 <strong>${new Date(task.time).toLocaleString()}</strong>
-                <p>${task.content}</p>
+                <p>${task.content || '(No message)'}</p>
                 <button class="delete-btn" onclick="deleteScheduled(${idx})">Cancel</button>
             </div>
         `).join('');
     } catch (err) {
         console.error('Scheduled load error:', err);
+        document.getElementById('scheduled-posts').innerHTML = '<p style="color: #DA373C;">Error loading posts</p>';
     }
 }
 
@@ -426,6 +472,12 @@ async function loadHistory() {
 function previewMedia() {
     const fileInput = document.getElementById('mediaFile');
     const preview = document.getElementById('preview-container');
+    showPreview(fileInput, preview);
+}
+
+function schedulePreviewMedia() {
+    const fileInput = document.getElementById('scheduleMediaFile');
+    const preview = document.getElementById('schedulePreview');
     showPreview(fileInput, preview);
 }
 
