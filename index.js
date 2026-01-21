@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, AttachmentBuilder, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, AttachmentBuilder } = require('discord.js');
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -6,135 +6,141 @@ const multer = require('multer');
 const fs = require('fs');
 
 const app = express();
-
-// FIX: Changed to upload.array to handle multiple files and prevent 500 errors
-const upload = multer({ 
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
-});
-
-// --- CONFIG ---
 const PORT = process.env.PORT || 8000;
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'defaultPassword';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'password123';
 
-// File Paths
-const DATA_DIR = __dirname;
-const SCHEDULE_FILE = path.join(DATA_DIR, 'schedule.json');
-const QUEUE_FILE = path.join(DATA_DIR, 'queue.json');
-const LIBRARY_FILE = path.join(DATA_DIR, 'library.json');
-const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
-const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
-const ANALYTICS_FILE = path.join(DATA_DIR, 'analytics.json');
-const BRANDING_FILE = path.join(DATA_DIR, 'branding.json');
-const RECURRING_FILE = path.join(DATA_DIR, 'recurring.json');
-const SUGGESTIONS_FILE = path.join(DATA_DIR, 'suggestions.json');
+// File paths
+const DATA_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
 
-// --- HELPER: SAFE FILE READ/WRITE ---
-function safeRead(filePath, isArray = true) {
-    if (!fs.existsSync(filePath)) {
-        const initial = isArray ? '[]' : '{}';
-        fs.writeFileSync(filePath, initial);
-        return isArray ? [] : {};
+const FILES = {
+    schedule: path.join(DATA_DIR, 'schedule.json'),
+    history: path.join(DATA_DIR, 'history.json'),
+    suggestions: path.join(DATA_DIR, 'suggestions.json'),
+    library: path.join(DATA_DIR, 'library.json'),
+    templates: path.join(DATA_DIR, 'templates.json'),
+};
+
+// Ensure all files exist
+Object.values(FILES).forEach(file => {
+    if (!fs.existsSync(file)) {
+        fs.writeFileSync(file, file.includes('history') ? '{"posts":[]}' : '[]');
     }
+});
+
+// Safe read/write
+const readFile = (file) => {
     try {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        return JSON.parse(content || (isArray ? '[]' : '{}'));
-    } catch (err) {
-        return isArray ? [] : {};
+        const data = fs.readFileSync(file, 'utf-8');
+        return JSON.parse(data);
+    } catch {
+        return file.includes('history') ? { posts: [] } : [];
     }
-}
+};
 
-function safeWrite(filePath, data) {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-}
+const writeFile = (file, data) => {
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+};
+
+// Multer config
+const upload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024 }
+});
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- DISCORD CLIENT ---
-const client = new Client({ 
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] 
-});
-
-// --- REGISTER SLASH COMMANDS ---
-const commands = [
-    new SlashCommandBuilder()
-        .setName('suggest')
-        .setDescription('Submit a suggestion')
-        .addStringOption(opt => opt.setName('idea').setDescription('Your idea').setRequired(true))
-        .addStringOption(opt => opt.setName('details').setDescription('Extra details'))
-];
-
-async function registerCommands() {
-    if (!DISCORD_CLIENT_ID) return console.log("Missing DISCORD_CLIENT_ID, skipping slash command registration.");
-    try {
-        const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
-        await rest.put(Routes.applicationCommands(DISCORD_CLIENT_ID), { body: commands });
-        console.log('✓ Slash Commands Registered');
-    } catch (error) { console.error(error); }
-}
-
-client.once('ready', () => {
-    console.log(`✓ Bot Online: ${client.user.tag}`);
-    registerCommands();
-});
-
-// Slash Command Listener
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName === 'suggest') {
-        const idea = interaction.options.getString('idea');
-        const details = interaction.options.getString('details') || '';
-        const suggestions = safeRead(SUGGESTIONS_FILE);
-        suggestions.push({ id: Date.now(), idea, details, userName: interaction.user.username, createdAt: new Date().toISOString() });
-        safeWrite(SUGGESTIONS_FILE, suggestions);
-        await interaction.reply({ content: '✓ Suggestion saved!', ephemeral: true });
+// Auth middleware
+const auth = (req, res, next) => {
+    if (req.headers['authorization'] !== ADMIN_PASSWORD) {
+        return res.status(403).json({ error: 'Unauthorized' });
     }
-});
-
-// --- AUTH MIDDLEWARE ---
-const checkAuth = (req, res, next) => {
-    if (req.headers['authorization'] !== ADMIN_PASSWORD) return res.status(403).json({ error: 'Unauthorized' });
     next();
 };
 
-// --- API ROUTES ---
-
-// Channels
-app.get('/api/channels', checkAuth, async (req, res) => {
-    try {
-        const channels = [];
-        client.guilds.cache.forEach(guild => {
-            guild.channels.cache.forEach(ch => {
-                if (ch.type === 0) channels.push({ id: ch.id, name: `${guild.name} - #${ch.name}`, guildId: guild.id });
-            });
-        });
-        res.json(channels);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+// Discord Client
+const client = new Client({ 
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] 
 });
 
-// Posting & Scheduling
-app.post('/api/post', checkAuth, upload.array('mediaFile', 5), async (req, res) => {
+client.once('ready', () => {
+    console.log(`✓ Bot Online: ${client.user.tag}`);
+});
+
+client.on('messageCreate', async (msg) => {
+    if (msg.author.bot) return;
+    
+    if (msg.content.startsWith('!suggest')) {
+        const text = msg.content.slice(9).trim();
+        if (!text) return msg.reply('Usage: `!suggest idea, details`');
+        
+        const [idea, ...rest] = text.split(',');
+        const suggestions = readFile(FILES.suggestions);
+        suggestions.push({
+            id: Date.now(),
+            idea: idea.trim(),
+            details: rest.join(',').trim(),
+            userName: msg.author.username,
+            createdAt: new Date().toISOString()
+        });
+        writeFile(FILES.suggestions, suggestions);
+        msg.reply(`✓ Suggestion saved: **${idea.trim()}**`);
+    }
+});
+
+// Routes
+app.get('/health', (req, res) => res.json({ status: 'ok', bot: client.user ? 'online' : 'offline' }));
+
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+app.get('/api/channels', auth, (req, res) => {
+    const channels = [];
+    client.guilds.cache.forEach(guild => {
+        guild.channels.cache.forEach(ch => {
+            if (ch.type === 0) {
+                channels.push({
+                    id: ch.id,
+                    name: `${guild.name} - #${ch.name}`,
+                    guildId: guild.id
+                });
+            }
+        });
+    });
+    res.json(channels);
+});
+
+// Send post
+app.post('/api/post', auth, upload.array('mediaFile', 5), async (req, res) => {
     try {
         const { channelId, postTitle, scheduleTime, videoUrl } = req.body;
+        if (!channelId) return res.status(400).json({ error: 'Channel required' });
 
+        // Scheduling
         if (scheduleTime) {
-            const tasks = safeRead(SCHEDULE_FILE);
-            tasks.push({
+            const schedule = readFile(FILES.schedule);
+            schedule.push({
+                id: Date.now(),
                 channelId,
-                content: postTitle,
+                postTitle: postTitle || '',
+                videoUrl: videoUrl || '',
                 time: scheduleTime,
-                videoUrl,
-                mediaFiles: req.files ? req.files.map(f => ({ buffer: f.buffer.toString('base64'), name: f.originalname })) : []
+                mediaFiles: req.files ? req.files.map(f => ({
+                    name: f.originalname,
+                    buffer: f.buffer.toString('base64')
+                })) : [],
+                createdAt: new Date().toISOString()
             });
-            safeWrite(SCHEDULE_FILE, tasks);
-            return res.json({ success: true, scheduled: true });
+            writeFile(FILES.schedule, schedule);
+            return res.json({ success: true, message: 'Scheduled!' });
         }
 
-        const channel = await client.channels.fetch(channelId);
+        // Send immediately
+        const channel = await client.channels.fetch(channelId).catch(() => null);
+        if (!channel) return res.status(400).json({ error: 'Channel not found' });
+
         const options = { content: postTitle || '' };
         if (videoUrl) options.content += `\n${videoUrl}`;
         if (req.files && req.files.length > 0) {
@@ -142,67 +148,133 @@ app.post('/api/post', checkAuth, upload.array('mediaFile', 5), async (req, res) 
         }
 
         await channel.send(options);
-        
-        // Update History
-        const history = safeRead(HISTORY_FILE, false);
-        if (!history.entries) history.entries = [];
-        history.entries.push({ videoTitle: postTitle, sentAt: new Date().toISOString() });
-        safeWrite(HISTORY_FILE, history);
 
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        // Save to history
+        const history = readFile(FILES.history);
+        history.posts.push({
+            title: postTitle,
+            time: new Date().toISOString(),
+            channelId
+        });
+        writeFile(FILES.history, history);
+
+        res.json({ success: true, message: 'Sent!' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
-// Templates
-app.get('/api/templates', checkAuth, (req, res) => res.json(safeRead(TEMPLATES_FILE)));
-app.post('/api/templates', checkAuth, (req, res) => {
-    const temps = safeRead(TEMPLATES_FILE);
-    temps.push({ id: Date.now(), ...req.body });
-    safeWrite(TEMPLATES_FILE, temps);
-    res.json({ success: true });
+// Scheduler runner
+async function runScheduler() {
+    const schedule = readFile(FILES.schedule);
+    const now = new Date();
+    const remaining = [];
+
+    for (const task of schedule) {
+        const taskTime = new Date(task.time);
+        if (taskTime <= now) {
+            try {
+                const channel = await client.channels.fetch(task.channelId);
+                const options = { content: task.postTitle || '' };
+                if (task.videoUrl) options.content += `\n${task.videoUrl}`;
+                if (task.mediaFiles && task.mediaFiles.length > 0) {
+                    options.files = task.mediaFiles.map(m => 
+                        new AttachmentBuilder(Buffer.from(m.buffer, 'base64'), { name: m.name })
+                    );
+                }
+                await channel.send(options);
+                console.log(`✓ Posted: ${task.postTitle}`);
+            } catch (err) {
+                console.error('Post failed:', err.message);
+                remaining.push(task);
+            }
+        } else {
+            remaining.push(task);
+        }
+    }
+    writeFile(FILES.schedule, remaining);
+}
+
+setInterval(runScheduler, 30000);
+
+// Get scheduled posts
+app.get('/api/scheduled', auth, (req, res) => {
+    res.json(readFile(FILES.schedule));
 });
 
-// Library
-app.get('/api/library', checkAuth, (req, res) => res.json(safeRead(LIBRARY_FILE)));
-app.post('/api/library/save', checkAuth, upload.array('mediaFile', 1), (req, res) => {
-    const lib = safeRead(LIBRARY_FILE);
-    lib.push({ id: Date.now(), title: req.body.title, category: req.body.category, videoUrl: req.body.videoUrl });
-    safeWrite(LIBRARY_FILE, lib);
+// Delete scheduled post
+app.delete('/api/scheduled/:id', auth, (req, res) => {
+    let schedule = readFile(FILES.schedule);
+    schedule = schedule.filter(s => s.id != req.params.id);
+    writeFile(FILES.schedule, schedule);
     res.json({ success: true });
 });
 
 // Suggestions
-app.get('/api/suggestions', checkAuth, (req, res) => res.json(safeRead(SUGGESTIONS_FILE)));
-app.delete('/api/suggestions/:id', checkAuth, (req, res) => {
-    const filtered = safeRead(SUGGESTIONS_FILE).filter(s => s.id != req.params.id);
-    safeWrite(SUGGESTIONS_FILE, filtered);
+app.post('/api/suggestions', (req, res) => {
+    const { idea, details, userName } = req.body;
+    if (!idea) return res.status(400).json({ error: 'Idea required' });
+    
+    const suggestions = readFile(FILES.suggestions);
+    suggestions.push({
+        id: Date.now(),
+        idea,
+        details: details || '',
+        userName: userName || 'Anonymous',
+        createdAt: new Date().toISOString()
+    });
+    writeFile(FILES.suggestions, suggestions);
+    res.json({ success: true, message: 'Thanks for the suggestion!' });
+});
+
+app.get('/api/suggestions', auth, (req, res) => {
+    res.json(readFile(FILES.suggestions));
+});
+
+app.delete('/api/suggestions/:id', auth, (req, res) => {
+    let suggestions = readFile(FILES.suggestions);
+    suggestions = suggestions.filter(s => s.id != req.params.id);
+    writeFile(FILES.suggestions, suggestions);
     res.json({ success: true });
 });
 
-// History & Analytics
-app.get('/api/history', checkAuth, (req, res) => res.json(safeRead(HISTORY_FILE, false).entries || []));
-app.get('/api/analytics', checkAuth, (req, res) => res.json(safeRead(ANALYTICS_FILE, false)));
+// History
+app.get('/api/history', auth, (req, res) => {
+    const history = readFile(FILES.history);
+    res.json(history.posts || []);
+});
 
-// Recurring
-app.get('/api/recurring', checkAuth, (req, res) => res.json(safeRead(RECURRING_FILE)));
-app.post('/api/recurring/add', checkAuth, (req, res) => {
-    const rec = safeRead(RECURRING_FILE);
-    rec.push({ id: Date.now(), ...req.body });
-    safeWrite(RECURRING_FILE, rec);
+// Library
+app.get('/api/library', auth, (req, res) => res.json(readFile(FILES.library)));
+app.post('/api/library', auth, upload.single('mediaFile'), (req, res) => {
+    const library = readFile(FILES.library);
+    library.push({
+        id: Date.now(),
+        title: req.body.title,
+        category: req.body.category || '',
+        videoUrl: req.body.videoUrl || ''
+    });
+    writeFile(FILES.library, library);
     res.json({ success: true });
 });
 
-// Scheduled List
-app.get('/api/scheduled', checkAuth, (req, res) => res.json(safeRead(SCHEDULE_FILE)));
-app.delete('/api/scheduled/:index', checkAuth, (req, res) => {
-    const tasks = safeRead(SCHEDULE_FILE);
-    tasks.splice(req.params.index, 1);
-    safeWrite(SCHEDULE_FILE, tasks);
+// Templates
+app.get('/api/templates', auth, (req, res) => res.json(readFile(FILES.templates)));
+app.post('/api/templates', auth, (req, res) => {
+    const templates = readFile(FILES.templates);
+    templates.push({
+        id: Date.now(),
+        name: req.body.name,
+        before: req.body.before || '',
+        after: req.body.after || ''
+    });
+    writeFile(FILES.templates, templates);
     res.json({ success: true });
 });
 
-// Health check for Koyeb
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.listen(PORT, () => {
+    console.log(`🚀 Server on port ${PORT}`);
+});
 
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server on port ${PORT}`));
 client.login(DISCORD_TOKEN);
