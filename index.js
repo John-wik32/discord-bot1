@@ -7,9 +7,19 @@ const fs = require('fs');
 
 const app = express();
 
+// Update multer to handle multiple files
 const upload = multer({ 
     storage: multer.memoryStorage(),
-    limits: { fileSize: 25 * 1024 * 1024 }
+    limits: { fileSize: 25 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'jpg', 'jpeg', 'png', 'gif', 'webp'];
+        const ext = file.originalname.split('.').pop().toLowerCase();
+        if (allowed.includes(ext)) {
+            cb(null, true);
+        } else {
+            cb(new Error('File type not allowed'));
+        }
+    }
 });
 
 // --- CONFIG ---
@@ -126,15 +136,17 @@ const checkAndSendSchedules = async () => {
 
                     const options = { content: task.content || '' };
                     
-                    if (task.mediaBuffer && task.mediaFileName) {
-                        options.files = [new AttachmentBuilder(Buffer.from(task.mediaBuffer, 'base64'), { name: task.mediaFileName })];
+                    if (task.mediaBuffers && task.mediaBuffers.length > 0) {
+                        options.files = task.mediaBuffers.map(m => 
+                            new AttachmentBuilder(Buffer.from(m.buffer, 'base64'), { name: m.name })
+                        );
                     } else if (task.videoUrl) {
                         options.content += `\n${task.videoUrl}`;
                     }
 
                     await channel.send(options);
                     console.log(`✓ Scheduled post sent to #${channel.name}`);
-                    saveHistory(task.channelId, task.content, task.videoUrl || task.mediaFileName, !!task.mediaBuffer);
+                    saveHistory(task.channelId, task.content, task.videoUrl || null, task.mediaBuffers?.length > 0);
                 } catch (err) {
                     console.error("Scheduled post failed:", err.message);
                     remainingTasks.push(task);
@@ -252,20 +264,35 @@ app.get('/health', (req, res) => res.status(200).json({ status: 'OK', bot: clien
 app.get('/api/channels', checkAuth, async (req, res) => {
     try {
         const channels = [];
-        if (client && client.guilds && client.guilds.cache) {
-            client.guilds.cache.forEach(guild => {
-                guild.channels.cache.forEach(ch => {
-                    if (ch.type === 0) {
-                        channels.push({ 
-                            id: ch.id, 
-                            name: `${guild.name} - #${ch.name}`,
-                            guildId: guild.id,
-                            guildName: guild.name
-                        });
-                    }
-                });
-            });
+        
+        // Wait for client to be ready
+        if (!client.isReady?.()) {
+            console.log("Bot not ready yet, waiting...");
+            return res.json([]);
         }
+        
+        if (client && client.guilds && client.guilds.cache && client.guilds.cache.size > 0) {
+            for (const [guildId, guild] of client.guilds.cache) {
+                try {
+                    for (const [channelId, ch] of guild.channels.cache) {
+                        if (ch.type === 0 && ch.permissionsFor(client.user).has('SendMessages')) {
+                            channels.push({ 
+                                id: ch.id, 
+                                name: `${guild.name} - #${ch.name}`,
+                                guildId: guild.id,
+                                guildName: guild.name
+                            });
+                        }
+                    }
+                } catch (err) {
+                    console.error("Guild fetch error:", err);
+                }
+            }
+        } else {
+            console.log("No guilds found in cache");
+        }
+        
+        console.log(`Found ${channels.length} available channels`);
         res.json(channels);
     } catch (err) {
         console.error("Channels error:", err);
@@ -287,8 +314,13 @@ app.post('/api/post', checkAuth, upload.single('mediaFile'), async (req, res) =>
 
         if (scheduleTime && scheduleTime.trim() !== '') {
             const scheduledDate = new Date(scheduleTime);
-            if (scheduledDate <= new Date()) {
-                return res.status(400).json({ error: 'Schedule time must be in future' });
+            const now = new Date();
+            
+            // Allow 1 minute buffer for same-day scheduling
+            const minTime = new Date(now.getTime() + 60000);
+            
+            if (scheduledDate < minTime) {
+                return res.status(400).json({ error: 'Schedule time must be at least 1 minute in the future' });
             }
 
             const tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
