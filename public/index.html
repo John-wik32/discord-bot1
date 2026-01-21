@@ -1,46 +1,23 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Discord Bot Manager</title>
-<link rel="stylesheet" href="style.css">
+  <title>Discord Poster</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <div id="login">
-  <input type="password" id="pw" placeholder="Admin password">
+  <h1>Admin Login</h1>
+  <input id="pw" placeholder="Admin Password" type="password">
   <button onclick="login()">Login</button>
 </div>
 
 <div id="app" class="hidden">
-  <button onclick="tab('send')">Send</button>
-  <button onclick="tab('schedule')">Schedule</button>
-  <button onclick="tab('test')">Test</button>
-  <button onclick="tab('scheduled')">Scheduled</button>
-  <button onclick="tab('history')">History</button>
+  <h1>Send Message</h1>
 
-  <div id="send">
-    <select id="sendChannel"></select>
-    <textarea id="sendText"></textarea>
-    <input type="file" id="sendFiles" multiple>
-    <button onclick="send()">Send</button>
-  </div>
-
-  <div id="schedule" class="hidden">
-    <select id="scheduleChannel"></select>
-    <textarea id="scheduleText"></textarea>
-    <input type="file" id="scheduleFiles" multiple>
-    <input type="datetime-local" id="scheduleTime">
-    <button onclick="schedule()">Schedule</button>
-  </div>
-
-  <div id="test" class="hidden">
-    <select id="testChannel"></select>
-    <input type="file" id="testFiles" multiple>
-    <button onclick="test()">Test Send</button>
-  </div>
-
-  <div id="scheduled" class="hidden"></div>
-  <div id="history" class="hidden"></div>
+  <select id="channel"></select>
+  <textarea id="text" placeholder="Message"></textarea>
+  <button onclick="send()">Send</button>
 </div>
 
 <script src="script.js"></script>
