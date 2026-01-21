@@ -12,27 +12,31 @@ async function fetchChannels() {
     }
 
     try {
+        console.log('Fetching channels...');
         const res = await fetch(`${API_BASE}/api/channels`, {
             headers: { 'Authorization': password }
         });
-        if (!res.ok) throw new Error("Invalid password");
+        
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: Invalid password or server error`);
+        }
 
         let channels = await res.json();
+        console.log(`Got ${channels.length} channels`);
         
-        // If no channels, wait 2 seconds and retry (bot might not be fully ready)
         if (!channels || channels.length === 0) {
-            console.log("No channels found, retrying...");
+            console.log('No channels found, retrying in 2 seconds...');
             await new Promise(resolve => setTimeout(resolve, 2000));
             const retryRes = await fetch(`${API_BASE}/api/channels`, {
                 headers: { 'Authorization': password }
             });
             channels = await retryRes.json();
+            console.log(`Retry got ${channels.length} channels`);
         }
 
         currentPassword = password;
         allChannels = channels;
         
-        // Populate ALL channel selects on the page
         updateAllChannelSelects(channels);
         
         document.getElementById('login-container').classList.add('hidden');
@@ -44,8 +48,11 @@ async function fetchChannels() {
         loadHistory();
         loadAnalytics();
         loadRecurringPosts();
+        loadSuggestions();
+        
         alert(`✓ Connected! Found ${channels.length} channels`);
     } catch (err) {
+        console.error('Auth error:', err);
         alert('Error: ' + err.message);
     }
 }
@@ -363,6 +370,76 @@ async function deleteLibraryItem(id) {
 
 function quickPostFromLibrary(id) {
     alert('Quick post feature: Select library item #' + id + ' and a channel to post instantly');
+}
+
+// ===== SUGGESTIONS =====
+async function submitSuggestion() {
+    const idea = document.getElementById('suggestionIdea').value;
+    const details = document.getElementById('suggestionDetails').value;
+    const userName = document.getElementById('suggestionName').value || 'Anonymous';
+
+    if (!idea) return alert('Please enter your idea');
+
+    try {
+        const res = await fetch(`${API_BASE}/api/suggestions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idea, details, userName })
+        });
+        const result = await res.json();
+        if (res.ok) {
+            alert('✓ Thank you for your suggestion!');
+            document.getElementById('suggestionIdea').value = '';
+            document.getElementById('suggestionDetails').value = '';
+            document.getElementById('suggestionName').value = '';
+            loadSuggestions();
+        } else {
+            alert('Error: ' + result.error);
+        }
+    } catch (err) {
+        alert('Server error');
+    }
+}
+
+async function loadSuggestions() {
+    try {
+        const res = await fetch(`${API_BASE}/api/suggestions`, {
+            headers: { 'Authorization': currentPassword }
+        });
+        const suggestions = await res.json();
+        const container = document.getElementById('suggestions-container');
+        
+        if (!suggestions || suggestions.length === 0) {
+            container.innerHTML = '<p style="color: #888;">No suggestions yet. Be the first!</p>';
+            return;
+        }
+
+        container.innerHTML = suggestions.map(s => `
+            <div class="scheduled-item">
+                <div>
+                    <strong>${s.idea}</strong>
+                    ${s.details ? `<p style="color: #888; margin: 5px 0 0 0;">${s.details}</p>` : ''}
+                    <small style="color: #aaa;">by ${s.userName} • ${new Date(s.createdAt).toLocaleDateString()}</small>
+                </div>
+                <button class="delete-btn" onclick="deleteSuggestion(${s.id})" style="white-space: nowrap;">Delete</button>
+            </div>
+        `).join('');
+    } catch (err) {
+        console.error('Suggestions load error:', err);
+    }
+}
+
+async function deleteSuggestion(id) {
+    if (!confirm('Delete this suggestion?')) return;
+    try {
+        await fetch(`${API_BASE}/api/suggestions/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': currentPassword }
+        });
+        loadSuggestions();
+    } catch (err) {
+        alert('Error');
+    }
 }
 
 // ===== TEMPLATES =====
