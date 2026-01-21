@@ -25,13 +25,18 @@ const HISTORY_FILE = path.join(__dirname, 'history.json');
 const ANALYTICS_FILE = path.join(__dirname, 'analytics.json');
 const BRANDING_FILE = path.join(__dirname, 'branding.json');
 const RECURRING_FILE = path.join(__dirname, 'recurring.json');
-
 const SUGGESTIONS_FILE = path.join(__dirname, 'suggestions.json');
 
 // Initialize files
-[SCHEDULE_FILE, QUEUE_FILE, LIBRARY_FILE, TEMPLATES_FILE, HISTORY_FILE, ANALYTICS_FILE, BRANDING_FILE, RECURRING_FILE, SUGGESTIONS_FILE].forEach(file => {
+// FIX: Explicitly define which files should be Arrays vs Objects to prevent type errors
+const ARRAY_FILES = [SCHEDULE_FILE, TEMPLATES_FILE, SUGGESTIONS_FILE];
+const ALL_FILES = [SCHEDULE_FILE, QUEUE_FILE, LIBRARY_FILE, TEMPLATES_FILE, HISTORY_FILE, ANALYTICS_FILE, BRANDING_FILE, RECURRING_FILE, SUGGESTIONS_FILE];
+
+ALL_FILES.forEach(file => {
     if (!fs.existsSync(file)) {
-        fs.writeFileSync(file, JSON.stringify(file.includes('templates') ? [] : {}));
+        // If it's in the ARRAY_FILES list, init as [], otherwise {}
+        const initialData = ARRAY_FILES.includes(file) ? [] : {};
+        fs.writeFileSync(file, JSON.stringify(initialData, null, 2));
     }
 });
 
@@ -116,6 +121,13 @@ const checkAndSendSchedules = async () => {
     try {
         const data = fs.readFileSync(SCHEDULE_FILE, 'utf-8');
         let tasks = JSON.parse(data || '[]');
+        
+        // FIX: Ensure tasks is an array, recover if corrupted
+        if (!Array.isArray(tasks)) {
+            console.error("Schedule file corrupted (was object), resetting to array.");
+            tasks = [];
+        }
+
         const now = Date.now();
         const remainingTasks = [];
 
@@ -133,13 +145,15 @@ const checkAndSendSchedules = async () => {
                         options.files = task.mediaBuffers.map(m => 
                             new AttachmentBuilder(Buffer.from(m.buffer, 'base64'), { name: m.name })
                         );
+                    } else if (task.mediaBuffer) { // Backward compatibility
+                        options.files = [new AttachmentBuilder(Buffer.from(task.mediaBuffer, 'base64'), { name: task.mediaFileName })];
                     } else if (task.videoUrl) {
                         options.content += `\n${task.videoUrl}`;
                     }
 
                     await channel.send(options);
                     console.log(`✓ Scheduled post sent to #${channel.name}`);
-                    saveHistory(task.channelId, task.content, task.videoUrl || null, task.mediaBuffers?.length > 0);
+                    saveHistory(task.channelId, task.content, task.videoUrl || null, task.mediaBuffers?.length > 0 || !!task.mediaBuffer);
                 } catch (err) {
                     console.error("Scheduled post failed:", err.message);
                     remainingTasks.push(task);
@@ -263,8 +277,11 @@ app.post('/api/suggestions', async (req, res) => {
             return res.status(400).json({ error: 'Idea required' });
         }
 
-        const suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+        let suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
         
+        // FIX: Ensure array
+        if (!Array.isArray(suggestions)) suggestions = [];
+
         suggestions.push({
             id: Date.now(),
             idea,
@@ -284,7 +301,9 @@ app.post('/api/suggestions', async (req, res) => {
 
 app.get('/api/suggestions', checkAuth, (req, res) => {
     try {
-        const suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+        let suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+        // FIX: Ensure array so .map works on client
+        if (!Array.isArray(suggestions)) suggestions = [];
         res.json(suggestions);
     } catch (err) {
         res.json([]);
@@ -294,8 +313,10 @@ app.get('/api/suggestions', checkAuth, (req, res) => {
 app.delete('/api/suggestions/:id', checkAuth, (req, res) => {
     try {
         let suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
-        suggestions = suggestions.filter(s => s.id != req.params.id);
-        fs.writeFileSync(SUGGESTIONS_FILE, JSON.stringify(suggestions, null, 2));
+        if (Array.isArray(suggestions)) {
+            suggestions = suggestions.filter(s => s.id != req.params.id);
+            fs.writeFileSync(SUGGESTIONS_FILE, JSON.stringify(suggestions, null, 2));
+        }
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -311,7 +332,7 @@ app.get('/api/channels', checkAuth, async (req, res) => {
                 if (guild.channels && guild.channels.cache) {
                     guild.channels.cache.forEach(ch => {
                         try {
-                            if (ch.type === 0) {
+                            if (ch.type === 0) { // Text channels
                                 channels.push({ 
                                     id: ch.id, 
                                     name: `${guild.name} - #${ch.name}`,
@@ -356,8 +377,11 @@ app.post('/api/post', checkAuth, upload.single('mediaFile'), async (req, res) =>
                 return res.status(400).json({ error: 'Schedule time must be at least 1 minute in the future' });
             }
 
-            const tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
+            let tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
             
+            // FIX: Ensure tasks is array before pushing
+            if (!Array.isArray(tasks)) tasks = [];
+
             let mediaBuffer = null, mediaFileName = null;
             if (req.file) {
                 mediaBuffer = req.file.buffer.toString('base64');
@@ -406,7 +430,10 @@ app.post('/api/batch/upload', checkAuth, upload.array('mediaFiles', 20), async (
 
         const intervalMs = parseInt(interval) * 3600000;
         let currentTime = new Date(startTime);
-        const tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
+        
+        let tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
+        // FIX: Ensure array
+        if (!Array.isArray(tasks)) tasks = [];
 
         req.files.forEach((file, idx) => {
             const title = titleArray[idx] || `Video ${idx + 1}`;
@@ -527,12 +554,23 @@ app.delete('/api/recurring/:id', checkAuth, (req, res) => {
 // EXPORT/BACKUP
 app.get('/api/export/all', checkAuth, (req, res) => {
     try {
+        // Safe reads to avoid crashing export on corrupted files
+        const safeReadArray = (file) => {
+            try { 
+                const d = JSON.parse(fs.readFileSync(file, 'utf-8') || '[]');
+                return Array.isArray(d) ? d : [];
+            } catch(e) { return []; }
+        };
+        const safeReadObj = (file) => {
+            try { return JSON.parse(fs.readFileSync(file, 'utf-8') || '{}'); } catch(e) { return {}; }
+        };
+
         const backup = {
-            schedule: JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]'),
-            queue: JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8') || '{}'),
-            library: JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf-8') || '{}'),
-            templates: JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]'),
-            recurring: JSON.parse(fs.readFileSync(RECURRING_FILE, 'utf-8') || '{}'),
+            schedule: safeReadArray(SCHEDULE_FILE),
+            queue: safeReadObj(QUEUE_FILE),
+            library: safeReadObj(LIBRARY_FILE),
+            templates: safeReadArray(TEMPLATES_FILE),
+            recurring: safeReadObj(RECURRING_FILE),
             exportDate: new Date().toISOString()
         };
         res.json(backup);
@@ -663,6 +701,7 @@ app.post('/api/templates', checkAuth, async (req, res) => {
     try {
         const { name, before, after, category } = req.body;
         let templates = JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]');
+        if (!Array.isArray(templates)) templates = [];
 
         templates.push({
             id: Date.now(),
@@ -682,7 +721,7 @@ app.post('/api/templates', checkAuth, async (req, res) => {
 app.get('/api/templates', checkAuth, (req, res) => {
     try {
         const templates = JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]');
-        res.json(templates);
+        res.json(Array.isArray(templates) ? templates : []);
     } catch (err) {
         res.json([]);
     }
@@ -691,8 +730,10 @@ app.get('/api/templates', checkAuth, (req, res) => {
 app.delete('/api/templates/:id', checkAuth, (req, res) => {
     try {
         let templates = JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]');
-        templates = templates.filter(t => t.id != req.params.id);
-        fs.writeFileSync(TEMPLATES_FILE, JSON.stringify(templates, null, 2));
+        if (Array.isArray(templates)) {
+            templates = templates.filter(t => t.id != req.params.id);
+            fs.writeFileSync(TEMPLATES_FILE, JSON.stringify(templates, null, 2));
+        }
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -728,7 +769,9 @@ app.get('/api/scheduled', checkAuth, (req, res) => {
 app.delete('/api/scheduled/:index', checkAuth, (req, res) => {
     try {
         const index = parseInt(req.params.index);
-        const tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
+        let tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
+        if (!Array.isArray(tasks)) tasks = [];
+        
         if (index < 0 || index >= tasks.length) return res.status(400).json({ error: 'Invalid index' });
         tasks.splice(index, 1);
         fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(tasks, null, 2));
@@ -761,21 +804,6 @@ const client = new Client({
 client.once('ready', () => {
     console.log(`✓ Bot Online: ${client.user.tag}`);
     console.log(`✓ Serving ${client.guilds.cache.size} guild(s)`);
-    
-    // Force update channels on startup
-    setTimeout(() => {
-        const channels = [];
-        client.guilds.cache.forEach(guild => {
-            if (guild.channels && guild.channels.cache) {
-                guild.channels.cache.forEach(ch => {
-                    if (ch.type === 0) {
-                        channels.push({ id: ch.id, name: ch.name });
-                    }
-                });
-            }
-        });
-        console.log(`✓ Available channels: ${channels.length}`);
-    }, 1000);
 });
 
 client.on('messageCreate', async (msg) => {
@@ -795,8 +823,9 @@ client.on('messageCreate', async (msg) => {
             const details = parts[1]?.trim() || '';
 
             try {
-                const suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
-                
+                let suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+                if (!Array.isArray(suggestions)) suggestions = []; // FIX: Ensure array
+
                 suggestions.push({
                     id: Date.now(),
                     idea,
