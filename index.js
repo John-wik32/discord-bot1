@@ -1,465 +1,518 @@
-const { Client, GatewayIntentBits, AttachmentBuilder, EmbedBuilder } = require('discord.js');
-const express = require('express');
-const path = require('path');
-const cors = require('cors');
-const multer = require('multer');
-const fs = require('fs');
-const https = require('https');
+const API_BASE = window.location.origin;
+let currentPassword = '';
+let selectedGuildId = '';
 
-const app = express();
-
-const upload = multer({ 
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 25 * 1024 * 1024 }
-});
-
-// --- CONFIG ---
-const PORT = process.env.PORT || 8000;
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'defaultPassword';
-const SCHEDULE_FILE = path.join(__dirname, 'schedule.json');
-const QUEUE_FILE = path.join(__dirname, 'queue.json');
-const LIBRARY_FILE = path.join(__dirname, 'library.json');
-const TEMPLATES_FILE = path.join(__dirname, 'templates.json');
-const HISTORY_FILE = path.join(__dirname, 'history.json');
-
-// Initialize files
-[SCHEDULE_FILE, QUEUE_FILE, LIBRARY_FILE, TEMPLATES_FILE, HISTORY_FILE].forEach(file => {
-    if (!fs.existsSync(file)) {
-        fs.writeFileSync(file, JSON.stringify(file.includes('templates') ? [] : {}));
+// ===== AUTHENTICATION =====
+async function fetchChannels() {
+    const password = document.getElementById('adminPassword').value;
+    if (!password) {
+        alert('Please enter a password');
+        return;
     }
-});
 
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-const publicPath = path.resolve(__dirname, 'public');
-app.use(express.static(publicPath));
-
-// --- UTILITIES ---
-const saveHistory = (channelId, videoTitle, url, hasMedia, scheduledFor = null) => {
     try {
-        const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8') || '{}');
-        if (!history.entries) history.entries = [];
-        history.entries.push({
-            channelId,
-            videoTitle,
-            url,
-            hasMedia,
-            sentAt: new Date().toISOString(),
-            scheduledFor
+        const res = await fetch(`${API_BASE}/api/channels`, {
+            headers: { 'Authorization': password }
         });
-        if (history.entries.length > 500) history.entries.shift();
-        fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
-    } catch (err) {
-        console.error("History save error:", err);
-    }
-};
+        if (!res.ok) throw new Error("Invalid password");
 
-const getYouTubeThumbnail = (url) => {
-    try {
-        const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
-        if (match) return `https://img.youtube.com/vi/${match[1]}/hqdefault.jpg`;
-    } catch (err) {}
-    return null;
-};
-
-// --- SCHEDULER LOGIC ---
-let schedulerActive = false;
-
-const checkAndSendSchedules = async () => {
-    if (schedulerActive || !client.user) return;
-    schedulerActive = true;
-    
-    try {
-        const data = fs.readFileSync(SCHEDULE_FILE, 'utf-8');
-        let tasks = JSON.parse(data || '[]');
-        const now = Date.now();
-        const remainingTasks = [];
-
-        for (const task of tasks) {
-            const taskTime = new Date(task.time).getTime();
-            
-            if (taskTime <= now) {
-                try {
-                    const channel = await client.channels.fetch(task.channelId);
-                    if (!channel) continue;
-
-                    const options = { content: task.content || '' };
-                    
-                    if (task.mediaBuffer && task.mediaFileName) {
-                        options.files = [new AttachmentBuilder(Buffer.from(task.mediaBuffer, 'base64'), { name: task.mediaFileName })];
-                    } else if (task.videoUrl) {
-                        options.content += `\n${task.videoUrl}`;
-                    }
-
-                    await channel.send(options);
-                    console.log(`✓ Scheduled post sent to #${channel.name}`);
-                    saveHistory(task.channelId, task.content, task.videoUrl || task.mediaFileName, !!task.mediaBuffer);
-                } catch (err) {
-                    console.error("Scheduled post failed:", err.message);
-                    remainingTasks.push(task);
-                }
-            } else {
-                remainingTasks.push(task);
-            }
-        }
+        const channels = await res.json();
+        currentPassword = password;
         
-        fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(remainingTasks, null, 2));
-    } catch (err) {
-        console.error("Scheduler error:", err);
-    } finally {
-        schedulerActive = false;
-    }
-};
-
-// Check queue for auto-play
-const processQueue = async () => {
-    try {
-        const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8') || '{}');
+        const select = document.getElementById('channelSelect');
+        select.innerHTML = '<option value="">-- Select Channel --</option>' + 
+            channels.map(c => `<option value="${c.id}" data-guild="${c.guildId}">${c.name}</option>`).join('');
         
-        for (const guildId in queue) {
-            const items = queue[guildId].filter(item => item.status === 'pending');
-            
-            if (items.length > 0) {
-                const nextItem = items[0];
-                try {
-                    const channel = await client.channels.fetch(nextItem.channelId);
-                    if (!channel) continue;
-
-                    const options = { content: nextItem.message || nextItem.title };
-                    
-                    if (nextItem.mediaBuffer) {
-                        options.files = [new AttachmentBuilder(Buffer.from(nextItem.mediaBuffer, 'base64'), { name: nextItem.fileName })];
-                    } else if (nextItem.videoUrl) {
-                        options.content += `\n${nextItem.videoUrl}`;
-                    }
-
-                    await channel.send(options);
-                    nextItem.status = 'completed';
-                    nextItem.sentAt = new Date().toISOString();
-                    fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
-                    console.log(`✓ Queue item processed for guild ${guildId}`);
-                } catch (err) {
-                    console.error("Queue processing error:", err);
-                }
-            }
-        }
+        document.getElementById('login-container').classList.add('hidden');
+        document.getElementById('dashboard-container').classList.remove('hidden');
+        
+        loadTemplates();
+        loadLibrary();
+        loadScheduled();
+        loadHistory();
+        alert('✓ Connected!');
     } catch (err) {
-        console.error("Queue error:", err);
+        alert('Error: ' + err.message);
     }
-};
+}
 
-setInterval(checkAndSendSchedules, 30000);
-setInterval(processQueue, 60000);
+function setGuildFromChannel() {
+    const select = document.getElementById('channelSelect');
+    const option = select.options[select.selectedIndex];
+    selectedGuildId = option.dataset.guild || '';
+    loadQueue();
+}
 
-// --- AUTH MIDDLEWARE ---
-const checkAuth = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    if (!authHeader || authHeader !== ADMIN_PASSWORD) {
-        return res.status(403).json({ error: 'Unauthorized' });
-    }
-    next();
-};
+// ===== SEND/SCHEDULE =====
+async function sendPost() {
+    const channelId = document.getElementById('channelSelect').value;
+    const postTitle = document.getElementById('postContent').value;
+    const videoUrl = document.getElementById('videoUrl').value;
+    const fileInput = document.getElementById('mediaFile');
 
-// --- ROUTES ---
-app.get('/', (req, res) => res.sendFile(path.join(publicPath, 'index.html')));
-app.get('/health', (req, res) => res.status(200).json({ status: 'OK', bot: client.user ? 'Online' : 'Offline' }));
+    if (!channelId) return alert('Select a channel');
+    if (!postTitle && !fileInput.files[0] && !videoUrl) return alert('Add message, media, or URL');
 
-app.get('/api/channels', checkAuth, async (req, res) => {
+    const formData = new FormData();
+    formData.append('channelId', channelId);
+    formData.append('postTitle', postTitle);
+    if (videoUrl) formData.append('videoUrl', videoUrl);
+    if (fileInput.files[0]) formData.append('mediaFile', fileInput.files[0]);
+
     try {
-        const channels = [];
-        client.guilds.cache.forEach(guild => {
-            guild.channels.cache.forEach(ch => {
-                if (ch.type === 0 && ch.isSendable?.()) {
-                    channels.push({ 
-                        id: ch.id, 
-                        name: `${guild.name} - #${ch.name}`,
-                        guildId: guild.id,
-                        guildName: guild.name
-                    });
-                }
-            });
+        const res = await fetch(`${API_BASE}/api/post`, {
+            method: 'POST',
+            headers: { 'Authorization': currentPassword },
+            body: formData
         });
-        res.json(channels);
+        const result = await res.json();
+        if (res.ok) {
+            alert('✓ Post Sent!');
+            clearForm();
+        } else {
+            alert('Error: ' + result.error);
+        }
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        alert('Server error: ' + err.message);
     }
-});
+}
 
-// SEND IMMEDIATE POST
-app.post('/api/post', checkAuth, upload.single('mediaFile'), async (req, res) => {
+async function schedulePost() {
+    const channelId = document.getElementById('scheduleChannelSelect').value;
+    const postTitle = document.getElementById('schedulePostContent').value;
+    const scheduleTime = document.getElementById('scheduleTime').value;
+    const videoUrl = document.getElementById('scheduleVideoUrl').value;
+    const fileInput = document.getElementById('scheduleMediaFile');
+
+    if (!channelId) return alert('Select a channel');
+    if (!scheduleTime) return alert('Set schedule time');
+    if (!postTitle && !fileInput.files[0] && !videoUrl) return alert('Add message, media, or URL');
+
+    const formData = new FormData();
+    formData.append('channelId', channelId);
+    formData.append('postTitle', postTitle);
+    formData.append('scheduleTime', scheduleTime);
+    if (videoUrl) formData.append('videoUrl', videoUrl);
+    if (fileInput.files[0]) formData.append('mediaFile', fileInput.files[0]);
+
     try {
-        const { channelId, postTitle, scheduleTime, videoUrl, templateId } = req.body;
-
-        if (!channelId) return res.status(400).json({ error: 'Channel ID required' });
-
-        const channel = await client.channels.fetch(channelId).catch(() => null);
-        if (!channel) return res.status(400).json({ error: 'Channel not found' });
-
-        const content = postTitle || '';
-
-        if (scheduleTime && scheduleTime.trim() !== '') {
-            const scheduledDate = new Date(scheduleTime);
-            if (scheduledDate <= new Date()) {
-                return res.status(400).json({ error: 'Schedule time must be in future' });
-            }
-
-            const tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
-            
-            let mediaBuffer = null, mediaFileName = null;
-            if (req.file) {
-                mediaBuffer = req.file.buffer.toString('base64');
-                mediaFileName = req.file.originalname;
-            }
-
-            tasks.push({
-                channelId,
-                content,
-                time: scheduleTime,
-                mediaBuffer,
-                mediaFileName,
-                videoUrl: videoUrl || null,
-                createdAt: new Date().toISOString()
-            });
-
-            fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(tasks, null, 2));
-            return res.json({ success: true, scheduled: true, scheduledFor: scheduleTime });
-        }
-
-        // Send immediately
-        const options = { content };
-        if (req.file) {
-            options.files = [new AttachmentBuilder(req.file.buffer, { name: req.file.originalname })];
-        } else if (videoUrl) {
-            options.content += `\n${videoUrl}`;
-        }
-
-        await channel.send(options);
-        saveHistory(channelId, content, videoUrl || null, !!req.file);
-        res.json({ success: true, scheduled: false });
-    } catch (err) {
-        console.error("Post error:", err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// QUEUE ENDPOINTS
-app.post('/api/queue/add', checkAuth, upload.single('mediaFile'), async (req, res) => {
-    try {
-        const { channelId, title, guildId, message, videoUrl } = req.body;
-        const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8') || '{}');
-
-        if (!queue[guildId]) queue[guildId] = [];
-
-        let mediaBuffer = null, fileName = null;
-        if (req.file) {
-            mediaBuffer = req.file.buffer.toString('base64');
-            fileName = req.file.originalname;
-        }
-
-        queue[guildId].push({
-            id: Date.now(),
-            channelId,
-            title,
-            message: message || '',
-            mediaBuffer,
-            fileName,
-            videoUrl: videoUrl || null,
-            status: 'pending',
-            createdAt: new Date().toISOString()
+        const res = await fetch(`${API_BASE}/api/post`, {
+            method: 'POST',
+            headers: { 'Authorization': currentPassword },
+            body: formData
         });
-
-        fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
-        res.json({ success: true, queueLength: queue[guildId].length });
+        const result = await res.json();
+        if (res.ok) {
+            alert('✓ Post Scheduled!');
+            document.getElementById('schedulePostContent').value = '';
+            document.getElementById('scheduleTime').value = '';
+            document.getElementById('scheduleVideoUrl').value = '';
+            document.getElementById('scheduleMediaFile').value = '';
+            document.getElementById('schedulePreview').innerHTML = '';
+            loadScheduled();
+        } else {
+            alert('Error: ' + result.error);
+        }
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        alert('Server error: ' + err.message);
     }
-});
+}
 
-app.get('/api/queue/:guildId', checkAuth, (req, res) => {
+// TEST MODE - Simple send without schedule
+async function testSend() {
+    const channelId = document.getElementById('testChannelSelect').value;
+    const title = document.getElementById('testVideoTitle').value;
+    const fileInput = document.getElementById('testMediaFile');
+
+    if (!channelId) return alert('Select a channel');
+    if (!title && !fileInput.files[0]) return alert('Add title or media');
+
+    const formData = new FormData();
+    formData.append('channelId', channelId);
+    formData.append('postTitle', title);
+    if (fileInput.files[0]) formData.append('mediaFile', fileInput.files[0]);
+
     try {
-        const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8') || '{}');
-        const items = queue[req.params.guildId] || [];
-        res.json(items);
+        const res = await fetch(`${API_BASE}/api/post`, {
+            method: 'POST',
+            headers: { 'Authorization': currentPassword },
+            body: formData
+        });
+        const result = await res.json();
+        if (res.ok) {
+            alert('✓ Post Sent!');
+            document.getElementById('testVideoTitle').value = '';
+            document.getElementById('testMediaFile').value = '';
+            document.getElementById('testPreview').innerHTML = '';
+        } else {
+            alert('Error: ' + result.error);
+        }
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        alert('Server error');
     }
-});
+}
 
-app.delete('/api/queue/:guildId/:id', checkAuth, (req, res) => {
+function clearForm() {
+    document.getElementById('postContent').value = '';
+    document.getElementById('scheduleTime').value = '';
+    document.getElementById('videoUrl').value = '';
+    document.getElementById('mediaFile').value = '';
+    document.getElementById('preview-container').innerHTML = '';
+}
+
+// ===== QUEUE SYSTEM =====
+async function addToQueue() {
+    const channelId = document.getElementById('channelSelect').value;
+    const title = document.getElementById('queueTitle').value;
+    const message = document.getElementById('queueMessage').value;
+    const videoUrl = document.getElementById('queueVideoUrl').value;
+    const fileInput = document.getElementById('queueMediaFile');
+
+    if (!channelId || (!title && !fileInput.files[0] && !videoUrl)) {
+        return alert('Fill required fields');
+    }
+
+    const formData = new FormData();
+    formData.append('channelId', channelId);
+    formData.append('title', title);
+    formData.append('guildId', selectedGuildId);
+    formData.append('message', message);
+    if (videoUrl) formData.append('videoUrl', videoUrl);
+    if (fileInput.files[0]) formData.append('mediaFile', fileInput.files[0]);
+
     try {
-        const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8') || '{}');
-        const items = queue[req.params.guildId] || [];
-        queue[req.params.guildId] = items.filter(i => i.id != req.params.id);
-        fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
-        res.json({ success: true });
+        const res = await fetch(`${API_BASE}/api/queue/add`, {
+            method: 'POST',
+            headers: { 'Authorization': currentPassword },
+            body: formData
+        });
+        const result = await res.json();
+        if (res.ok) {
+            alert(`✓ Added to queue (${result.queueLength} items)`);
+            document.getElementById('queueTitle').value = '';
+            document.getElementById('queueMessage').value = '';
+            document.getElementById('queueVideoUrl').value = '';
+            document.getElementById('queueMediaFile').value = '';
+            loadQueue();
+        } else {
+            alert('Error: ' + result.error);
+        }
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        alert('Server error');
     }
-});
+}
 
-// LIBRARY ENDPOINTS
-app.post('/api/library/save', checkAuth, upload.single('mediaFile'), async (req, res) => {
+async function loadQueue() {
+    if (!selectedGuildId) return;
     try {
-        const { title, category, videoUrl } = req.body;
-        const library = JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf-8') || '{}');
-
-        if (!library.videos) library.videos = [];
-
-        let mediaBuffer = null, fileName = null;
-        if (req.file) {
-            mediaBuffer = req.file.buffer.toString('base64');
-            fileName = req.file.originalname;
+        const res = await fetch(`${API_BASE}/api/queue/${selectedGuildId}`, {
+            headers: { 'Authorization': currentPassword }
+        });
+        const items = await res.json();
+        const container = document.getElementById('queue-container');
+        
+        if (items.length === 0) {
+            container.innerHTML = '<p style="color: #888;">Queue empty</p>';
+            return;
         }
 
-        library.videos.push({
-            id: Date.now(),
-            title,
-            category: category || 'Uncategorized',
-            mediaBuffer,
-            fileName,
-            videoUrl: videoUrl || null,
-            thumbnail: getYouTubeThumbnail(videoUrl),
-            savedAt: new Date().toISOString()
+        container.innerHTML = items.map((item, idx) => `
+            <div class="queue-item">
+                <strong>${item.title}</strong>
+                <p>${item.message.substring(0, 50)}</p>
+                <small>${item.status}</small>
+                <button class="delete-btn" onclick="deleteQueueItem('${selectedGuildId}', ${item.id})">Delete</button>
+            </div>
+        `).join('');
+    } catch (err) {
+        console.error('Queue load error:', err);
+    }
+}
+
+async function deleteQueueItem(guildId, itemId) {
+    if (!confirm('Delete from queue?')) return;
+    try {
+        await fetch(`${API_BASE}/api/queue/${guildId}/${itemId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': currentPassword }
         });
-
-        fs.writeFileSync(LIBRARY_FILE, JSON.stringify(library, null, 2));
-        res.json({ success: true, id: library.videos[library.videos.length - 1].id });
+        loadQueue();
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        alert('Error deleting');
     }
-});
+}
 
-app.get('/api/library', checkAuth, (req, res) => {
-    try {
-        const library = JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf-8') || '{}');
-        const videos = library.videos || [];
-        const sanitized = videos.map(v => ({
-            id: v.id,
-            title: v.title,
-            category: v.category,
-            hasMedia: !!v.mediaBuffer,
-            videoUrl: v.videoUrl,
-            thumbnail: v.thumbnail,
-            savedAt: v.savedAt
-        }));
-        res.json(sanitized);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+// ===== LIBRARY SYSTEM =====
+async function saveToLibrary() {
+    const title = document.getElementById('libTitle').value;
+    const category = document.getElementById('libCategory').value;
+    const videoUrl = document.getElementById('libVideoUrl').value;
+    const fileInput = document.getElementById('libMediaFile');
+
+    if (!title || (!fileInput.files[0] && !videoUrl)) {
+        return alert('Title and media required');
     }
-});
 
-app.delete('/api/library/:id', checkAuth, (req, res) => {
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('category', category);
+    if (videoUrl) formData.append('videoUrl', videoUrl);
+    if (fileInput.files[0]) formData.append('mediaFile', fileInput.files[0]);
+
     try {
-        const library = JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf-8') || '{}');
-        library.videos = (library.videos || []).filter(v => v.id != req.params.id);
-        fs.writeFileSync(LIBRARY_FILE, JSON.stringify(library, null, 2));
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// TEMPLATES ENDPOINTS
-app.post('/api/templates', checkAuth, async (req, res) => {
-    try {
-        const { name, before, after, category } = req.body;
-        let templates = JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]');
-
-        templates.push({
-            id: Date.now(),
-            name,
-            before: before || '',
-            after: after || '',
-            category: category || 'General'
+        const res = await fetch(`${API_BASE}/api/library/save`, {
+            method: 'POST',
+            headers: { 'Authorization': currentPassword },
+            body: formData
         });
-
-        fs.writeFileSync(TEMPLATES_FILE, JSON.stringify(templates, null, 2));
-        res.json({ success: true, id: templates[templates.length - 1].id });
+        const result = await res.json();
+        if (res.ok) {
+            alert('✓ Saved to library');
+            document.getElementById('libTitle').value = '';
+            document.getElementById('libVideoUrl').value = '';
+            document.getElementById('libMediaFile').value = '';
+            loadLibrary();
+        } else {
+            alert('Error: ' + result.error);
+        }
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        alert('Server error');
     }
-});
+}
 
-app.get('/api/templates', checkAuth, (req, res) => {
+async function loadLibrary() {
     try {
-        const templates = JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]');
-        res.json(templates);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+        const res = await fetch(`${API_BASE}/api/library`, {
+            headers: { 'Authorization': currentPassword }
+        });
+        const videos = await res.json();
+        const container = document.getElementById('library-container');
+        
+        if (videos.length === 0) {
+            container.innerHTML = '<p style="color: #888;">Library empty</p>';
+            return;
+        }
 
-app.delete('/api/templates/:id', checkAuth, (req, res) => {
+        container.innerHTML = videos.map(v => `
+            <div class="library-item">
+                ${v.thumbnail ? `<img src="${v.thumbnail}" alt="${v.title}">` : ''}
+                <strong>${v.title}</strong>
+                <small>${v.category}</small>
+                <button onclick="quickPostFromLibrary(${v.id})">Quick Send</button>
+                <button class="delete-btn" onclick="deleteLibraryItem(${v.id})">Delete</button>
+            </div>
+        `).join('');
+    } catch (err) {
+        console.error('Library load error:', err);
+    }
+}
+
+async function deleteLibraryItem(id) {
+    if (!confirm('Delete from library?')) return;
     try {
-        let templates = JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]');
-        templates = templates.filter(t => t.id != req.params.id);
-        fs.writeFileSync(TEMPLATES_FILE, JSON.stringify(templates, null, 2));
-        res.json({ success: true });
+        await fetch(`${API_BASE}/api/library/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': currentPassword }
+        });
+        loadLibrary();
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        alert('Error');
     }
-});
+}
 
-// SCHEDULED ENDPOINTS
-app.get('/api/scheduled', checkAuth, (req, res) => {
+// ===== TEMPLATES =====
+async function saveTemplate() {
+    const name = document.getElementById('tempName').value;
+    const before = document.getElementById('tempBefore').value;
+    const after = document.getElementById('tempAfter').value;
+
+    if (!name) return alert('Template name required');
+
     try {
-        const tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
-        const sanitized = tasks.map(t => ({
-            time: t.time,
-            content: t.content.substring(0, 100),
-            hasMedia: !!t.mediaBuffer,
-            createdAt: t.createdAt
-        }));
-        res.json(sanitized);
+        const res = await fetch(`${API_BASE}/api/templates`, {
+            method: 'POST',
+            headers: { 'Authorization': currentPassword, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, before, after })
+        });
+        if (res.ok) {
+            alert('✓ Template saved');
+            clearTemplateForm();
+            loadTemplates();
+        }
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        alert('Error');
     }
-});
+}
 
-app.delete('/api/scheduled/:index', checkAuth, (req, res) => {
+async function loadTemplates() {
     try {
-        const index = parseInt(req.params.index);
-        const tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
-        if (index < 0 || index >= tasks.length) return res.status(400).json({ error: 'Invalid index' });
-        tasks.splice(index, 1);
-        fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(tasks, null, 2));
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+        const res = await fetch(`${API_BASE}/api/templates`, {
+            headers: { 'Authorization': currentPassword }
+        });
+        const templates = await res.json();
+        const container = document.getElementById('templates-container');
+        
+        if (templates.length === 0) {
+            container.innerHTML = '<p style="color: #888;">No templates</p>';
+            return;
+        }
 
-// HISTORY ENDPOINTS
-app.get('/api/history', checkAuth, (req, res) => {
+        container.innerHTML = templates.map(t => `
+            <div class="template-item">
+                <strong>${t.name}</strong>
+                <p>Before: ${t.before.substring(0, 30)}</p>
+                <p>After: ${t.after.substring(0, 30)}</p>
+                <button onclick="applyTemplate(${t.id})">Apply</button>
+                <button class="delete-btn" onclick="deleteTemplate(${t.id})">Delete</button>
+            </div>
+        `).join('');
+    } catch (err) {
+        console.error('Templates load error:', err);
+    }
+}
+
+function applyTemplate(id) {
+    alert('Template application feature coming soon');
+}
+
+async function deleteTemplate(id) {
+    if (!confirm('Delete template?')) return;
     try {
-        const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8') || '{}');
-        const entries = (history.entries || []).slice(-50).reverse();
-        res.json(entries);
+        await fetch(`${API_BASE}/api/templates/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': currentPassword }
+        });
+        loadTemplates();
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        alert('Error');
     }
-});
+}
 
-// --- DISCORD BOT ---
-const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.DirectMessages
-    ]
-});
+function clearTemplateForm() {
+    document.getElementById('tempName').value = '';
+    document.getElementById('tempBefore').value = '';
+    document.getElementById('tempAfter').value = '';
+}
 
-client.once('ready', () => {
-    console.log(`✓ Bot Online: ${client.user.tag}`);
-    console.log(`✓ Serving ${client.guilds.cache.size} guild(s)`);
-});
+// ===== SCHEDULED POSTS =====
+async function loadScheduled() {
+    try {
+        const res = await fetch(`${API_BASE}/api/scheduled`, {
+            headers: { 'Authorization': currentPassword }
+        });
+        
+        if (!res.ok) {
+            console.error('Scheduled load error: HTTP', res.status);
+            document.getElementById('scheduled-posts').innerHTML = '<p style="color: #888;">Error loading scheduled posts</p>';
+            return;
+        }
 
-client.on('error', err => console.error('Discord error:', err));
-process.on('unhandledRejection', err => console.error('Unhandled rejection:', err));
+        const tasks = await res.json();
+        const container = document.getElementById('scheduled-posts');
+        
+        if (!Array.isArray(tasks) || tasks.length === 0) {
+            container.innerHTML = '<p style="color: #888;">No scheduled posts</p>';
+            return;
+        }
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server listening on port ${PORT}`);
-});
+        container.innerHTML = tasks.map((task, idx) => `
+            <div class="scheduled-item">
+                <strong>${new Date(task.time).toLocaleString()}</strong>
+                <p>${task.content || '(No message)'}</p>
+                <button class="delete-btn" onclick="deleteScheduled(${idx})">Cancel</button>
+            </div>
+        `).join('');
+    } catch (err) {
+        console.error('Scheduled load error:', err);
+        document.getElementById('scheduled-posts').innerHTML = '<p style="color: #DA373C;">Error loading posts</p>';
+    }
+}
 
-client.login(DISCORD_TOKEN);
+async function deleteScheduled(index) {
+    if (!confirm('Cancel this post?')) return;
+    try {
+        const res = await fetch(`${API_BASE}/api/scheduled/${index}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': currentPassword }
+        });
+        if (res.ok) {
+            loadScheduled();
+        }
+    } catch (err) {
+        alert('Error');
+    }
+}
+
+// ===== HISTORY =====
+async function loadHistory() {
+    try {
+        const res = await fetch(`${API_BASE}/api/history`, {
+            headers: { 'Authorization': currentPassword }
+        });
+        const entries = await res.json();
+        const container = document.getElementById('history-container');
+        
+        if (entries.length === 0) {
+            container.innerHTML = '<p style="color: #888;">No history</p>';
+            return;
+        }
+
+        container.innerHTML = entries.map(e => `
+            <div class="history-item">
+                <small>${new Date(e.sentAt).toLocaleString()}</small>
+                <p>${e.videoTitle}</p>
+            </div>
+        `).join('');
+    } catch (err) {
+        console.error('History load error:', err);
+    }
+}
+
+// ===== MEDIA PREVIEW =====
+function previewMedia() {
+    const fileInput = document.getElementById('mediaFile');
+    const preview = document.getElementById('preview-container');
+    showPreview(fileInput, preview);
+}
+
+function schedulePreviewMedia() {
+    const fileInput = document.getElementById('scheduleMediaFile');
+    const preview = document.getElementById('schedulePreview');
+    showPreview(fileInput, preview);
+}
+
+function testPreviewMedia() {
+    const fileInput = document.getElementById('testMediaFile');
+    const preview = document.getElementById('testPreview');
+    showPreview(fileInput, preview);
+}
+
+function showPreview(fileInput, preview) {
+    if (!fileInput.files[0]) {
+        preview.innerHTML = '';
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+        const ext = file.name.split('.').pop().toLowerCase();
+        const videoExts = ['mp4', 'webm', 'mov', 'avi', 'mkv'];
+        const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+
+        if (videoExts.includes(ext)) {
+            preview.innerHTML = `<video controls style="max-width: 100%; border-radius: 5px;"><source src="${e.target.result}"></video>`;
+        } else if (imageExts.includes(ext)) {
+            preview.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; border-radius: 5px;">`;
+        } else {
+            preview.innerHTML = `<p>File: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)</p>`;
+        }
+    };
+
+    reader.readAsDataURL(file);
+}
+
+function quickPostFromLibrary(id) {
+    alert('Quick post feature coming soon - ID: ' + id);
+}
