@@ -25,13 +25,12 @@ body {
 
 .hidden { display: none !important; }
 
-/* LOGIN CONTAINER */
+/* LOGIN */
 .card-container {
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
-    width: 100%;
 }
 
 .login-card {
@@ -44,13 +43,9 @@ body {
     font-size: 2em;
 }
 
-.login-card p {
-    margin-bottom: 20px;
-}
-
 /* DASHBOARD */
 #dashboard-container {
-    max-width: 700px;
+    max-width: 900px;
     margin: 0 auto;
 }
 
@@ -58,13 +53,55 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 25px;
     padding-bottom: 15px;
     border-bottom: 2px solid var(--card);
 }
 
 .dashboard-header h1 {
     font-size: 1.8em;
+}
+
+/* TAB NAVIGATION */
+.tab-buttons {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 25px;
+    flex-wrap: wrap;
+    border-bottom: 2px solid var(--card);
+    padding-bottom: 15px;
+}
+
+.tab-btn {
+    background-color: transparent;
+    color: var(--text-muted);
+    border: none;
+    padding: 10px 15px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+    border-bottom: 3px solid transparent;
+    width: auto;
+    margin: 0;
+}
+
+.tab-btn:hover {
+    color: var(--text);
+    background-color: transparent;
+}
+
+.tab-btn.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+.tab-content {
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 /* CARDS */
@@ -77,9 +114,17 @@ body {
 }
 
 .card h2 {
-    margin-bottom: 20px;
+    margin-bottom: 10px;
     font-size: 1.3em;
-    color: var(--text);
+}
+
+.card h3 {
+    margin: 20px 0 15px 0;
+    font-size: 1.1em;
+}
+
+.card p {
+    margin-bottom: 15px;
 }
 
 label {
@@ -95,7 +140,7 @@ label:first-child {
     margin-top: 0;
 }
 
-/* INPUTS & TEXTAREA */
+/* INPUTS */
 input[type="text"],
 input[type="password"],
 input[type="file"],
@@ -151,12 +196,7 @@ button:active {
 }
 
 .primary-btn {
-    background-color: var(--primary);
     margin-top: 15px;
-}
-
-.primary-btn:hover {
-    background-color: var(--hover);
 }
 
 .logout-btn {
@@ -183,7 +223,8 @@ button:active {
 }
 
 /* PREVIEW */
-#preview-container {
+#preview-container,
+#testPreview {
     margin-top: 10px;
     padding: 10px;
     background-color: #1e1f22;
@@ -192,18 +233,21 @@ button:active {
 }
 
 #preview-container img,
-#preview-container video {
+#preview-container video,
+#testPreview img,
+#testPreview video {
     max-width: 100%;
     border-radius: 5px;
     max-height: 400px;
 }
 
-#preview-container p {
+#preview-container p,
+#testPreview p {
     color: var(--text-muted);
     margin: 0;
 }
 
-/* SCHEDULED POSTS */
+/* SCHEDULED ITEMS */
 .scheduled-item {
     background-color: #1e1f22;
     padding: 15px;
@@ -229,12 +273,142 @@ button:active {
     max-width: 400px;
 }
 
-.scheduled-item div {
-    flex: 1;
+/* QUEUE ITEMS */
+.queue-item {
+    background-color: #1e1f22;
+    padding: 12px;
+    border-radius: 5px;
+    margin-bottom: 10px;
+    border-left: 3px solid #5865F2;
+}
+
+.queue-item strong {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.queue-item p {
+    margin: 0 0 5px 0;
+    color: var(--text-muted);
+    font-size: 0.9em;
+}
+
+.queue-item small {
+    display: inline-block;
+    background-color: #2b2d31;
+    padding: 3px 8px;
+    border-radius: 3px;
+    margin-right: 10px;
+    font-size: 0.8em;
+}
+
+/* LIBRARY GRID */
+.library-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.library-item {
+    background-color: #1e1f22;
+    padding: 15px;
+    border-radius: 5px;
+    border: 1px solid #404249;
+    transition: all 0.2s;
+}
+
+.library-item:hover {
+    border-color: var(--primary);
+    box-shadow: 0 2px 8px rgba(88, 101, 242, 0.2);
+}
+
+.library-item img {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 3px;
+    margin-bottom: 10px;
+}
+
+.library-item strong {
+    display: block;
+    margin-bottom: 5px;
+    word-break: break-word;
+}
+
+.library-item small {
+    display: block;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    font-size: 0.85em;
+}
+
+.library-item button {
+    width: 100%;
+    margin: 5px 0;
+    font-size: 0.9em;
+    padding: 8px;
+}
+
+/* TEMPLATE ITEMS */
+.template-item {
+    background-color: #1e1f22;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 10px;
+    border-left: 3px solid #57F287;
+}
+
+.template-item strong {
+    display: block;
+    margin-bottom: 8px;
+}
+
+.template-item p {
+    margin: 0 0 8px 0;
+    color: var(--text-muted);
+    font-size: 0.9em;
+}
+
+.template-item button {
+    width: 48%;
+    margin: 0;
+    display: inline-block;
+    font-size: 0.9em;
+    padding: 8px;
+    margin-right: 2%;
+}
+
+.template-item .delete-btn {
+    margin-left: 0;
+    margin-right: 0;
+}
+
+/* HISTORY ITEMS */
+.history-item {
+    background-color: #1e1f22;
+    padding: 12px;
+    border-radius: 5px;
+    margin-bottom: 8px;
+    border-left: 3px solid #57F287;
+}
+
+.history-item small {
+    display: block;
+    color: var(--text-muted);
+    margin-bottom: 5px;
+    font-size: 0.85em;
+}
+
+.history-item p {
+    margin: 0;
+    color: var(--text);
+    word-break: break-word;
 }
 
 /* RESPONSIVE */
-@media (max-width: 600px) {
+@media (max-width: 768px) {
     body {
         padding: 10px;
     }
@@ -249,23 +423,45 @@ button:active {
         align-items: flex-start;
     }
 
+    .tab-buttons {
+        gap: 5px;
+    }
+
+    .tab-btn {
+        padding: 8px 12px;
+        font-size: 0.9em;
+    }
+
     .logout-btn {
         width: 100%;
     }
 
-    .scheduled-item {
+    .library-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+
+    .scheduled-item,
+    .queue-item {
         flex-direction: column;
         align-items: flex-start;
     }
 
-    .scheduled-item .delete-btn {
+    .scheduled-item .delete-btn,
+    .queue-item button {
         margin-left: 0;
         margin-top: 10px;
         width: 100%;
     }
 
     #preview-container img,
-    #preview-container video {
+    #preview-container video,
+    #testPreview img,
+    #testPreview video {
         max-height: 300px;
+    }
+
+    .template-item button {
+        width: 100%;
+        margin: 5px 0 !important;
     }
 }
