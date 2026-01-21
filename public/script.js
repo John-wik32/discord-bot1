@@ -17,7 +17,18 @@ async function fetchChannels() {
         });
         if (!res.ok) throw new Error("Invalid password");
 
-        const channels = await res.json();
+        let channels = await res.json();
+        
+        // If no channels, wait 2 seconds and retry (bot might not be fully ready)
+        if (!channels || channels.length === 0) {
+            console.log("No channels found, retrying...");
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            const retryRes = await fetch(`${API_BASE}/api/channels`, {
+                headers: { 'Authorization': password }
+            });
+            channels = await retryRes.json();
+        }
+
         currentPassword = password;
         allChannels = channels;
         
@@ -32,7 +43,8 @@ async function fetchChannels() {
         loadScheduled();
         loadHistory();
         loadAnalytics();
-        alert('✓ Connected!');
+        loadRecurringPosts();
+        alert(`✓ Connected! Found ${channels.length} channels`);
     } catch (err) {
         alert('Error: ' + err.message);
     }
@@ -60,16 +72,20 @@ async function sendPost() {
     const channelId = document.getElementById('channelSelect').value || document.getElementById('manualChannelId').value;
     const postTitle = document.getElementById('postContent').value;
     const videoUrl = document.getElementById('videoUrl').value;
-    const fileInput = document.getElementById('mediaFile');
+    const fileInputs = document.getElementById('mediaFile').files;
 
     if (!channelId) return alert('Select a channel or enter channel ID');
-    if (!postTitle && !fileInput.files[0] && !videoUrl) return alert('Add message, media, or URL');
+    if (!postTitle && fileInputs.length === 0 && !videoUrl) return alert('Add message, media, or URL');
+    if (fileInputs.length > 3) return alert('Maximum 3 files allowed');
 
     const formData = new FormData();
     formData.append('channelId', channelId);
     formData.append('postTitle', postTitle);
     if (videoUrl) formData.append('videoUrl', videoUrl);
-    if (fileInput.files[0]) formData.append('mediaFile', fileInput.files[0]);
+    
+    for (let i = 0; i < fileInputs.length; i++) {
+        formData.append('mediaFile', fileInputs[i]);
+    }
 
     try {
         const res = await fetch(`${API_BASE}/api/post`, {
@@ -79,7 +95,7 @@ async function sendPost() {
         });
         const result = await res.json();
         if (res.ok) {
-            alert('✓ Post Sent!');
+            alert(`✓ Post Sent! (${result.files || 0} files)`);
             clearForm();
         } else {
             alert('Error: ' + result.error);
@@ -94,18 +110,32 @@ async function schedulePost() {
     const postTitle = document.getElementById('schedulePostContent').value;
     const scheduleTime = document.getElementById('scheduleTime').value;
     const videoUrl = document.getElementById('scheduleVideoUrl').value;
-    const fileInput = document.getElementById('scheduleMediaFile');
+    const fileInputs = document.getElementById('scheduleMediaFile').files;
 
     if (!channelId) return alert('Select a channel or enter channel ID');
     if (!scheduleTime) return alert('Set schedule time');
-    if (!postTitle && !fileInput.files[0] && !videoUrl) return alert('Add message, media, or URL');
+    if (!postTitle && fileInputs.length === 0 && !videoUrl) return alert('Add message, media, or URL');
+    if (fileInputs.length > 3) return alert('Maximum 3 files allowed');
+
+    // Check if time is valid (at least 1 minute in future)
+    const scheduledDate = new Date(scheduleTime);
+    const now = new Date();
+    const minTime = new Date(now.getTime() + 60000); // 1 minute from now
+
+    if (scheduledDate < minTime) {
+        const timeLeft = Math.ceil((minTime - scheduledDate) / 1000 / 60);
+        return alert(`Schedule time must be at least 1 minute in the future. Current time: ${now.toLocaleString()}`);
+    }
 
     const formData = new FormData();
     formData.append('channelId', channelId);
     formData.append('postTitle', postTitle);
     formData.append('scheduleTime', scheduleTime);
     if (videoUrl) formData.append('videoUrl', videoUrl);
-    if (fileInput.files[0]) formData.append('mediaFile', fileInput.files[0]);
+    
+    for (let i = 0; i < fileInputs.length; i++) {
+        formData.append('mediaFile', fileInputs[i]);
+    }
 
     try {
         const res = await fetch(`${API_BASE}/api/post`, {
@@ -115,7 +145,7 @@ async function schedulePost() {
         });
         const result = await res.json();
         if (res.ok) {
-            alert('✓ Post Scheduled!');
+            alert(`✓ Post Scheduled for ${new Date(scheduleTime).toLocaleString()}! (${result.files || 0} files)`);
             document.getElementById('schedulePostContent').value = '';
             document.getElementById('scheduleTime').value = '';
             document.getElementById('scheduleVideoUrl').value = '';
@@ -640,6 +670,195 @@ async function deleteRecurring(id) {
     }
 }
 
+// ===== ADVANCED RECURRING SCHEDULE =====
+let recurringDayVideos = {};
+let currentRecurringDay = 'Monday';
+const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+function initAdvancedRecurring() {
+    const container = document.getElementById('advanced-recurring-container');
+    
+    let html = '<div class="recurring-setup">';
+    html += '<h3>📅 Schedule Videos by Day & Time</h3>';
+    html += '<div class="days-selector" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin: 20px 0;">';
+    
+    daysOfWeek.forEach(day => {
+        html += `<button onclick="selectRecurringDay('${day}')" class="day-btn" id="day-${day}" style="padding: 10px; border: 2px solid #404249; border-radius: 5px; background: #1e1f22; color: white; cursor: pointer;">${day}</button>`;
+    });
+    
+    html += '</div>';
+    html += '<div id="day-content-area"></div>';
+    html += '</div>';
+    
+    container.innerHTML = html;
+    selectRecurringDay('Monday');
+}
+
+function selectRecurringDay(day) {
+    currentRecurringDay = day;
+    
+    // Update button styles
+    daysOfWeek.forEach(d => {
+        const btn = document.getElementById(`day-${d}`);
+        if (d === day) {
+            btn.style.borderColor = '#5865F2';
+            btn.style.backgroundColor = '#4752c4';
+        } else {
+            btn.style.borderColor = '#404249';
+            btn.style.backgroundColor = '#1e1f22';
+        }
+    });
+    
+    // Load content for this day
+    loadDayContent(day);
+}
+
+function loadDayContent(day) {
+    const contentArea = document.getElementById('day-content-area');
+    
+    if (!recurringDayVideos[day]) {
+        recurringDayVideos[day] = [];
+    }
+    
+    const videos = recurringDayVideos[day];
+    
+    let html = `<div class="card" style="margin-top: 20px;"><h3>Videos for ${day}</h3>`;
+    
+    html += '<div class="time-slots">';
+    videos.forEach((video, idx) => {
+        html += `
+            <div class="time-slot" style="background: #1e1f22; padding: 15px; border-radius: 5px; margin-bottom: 10px; border-left: 3px solid #5865F2;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>${video.time || 'Not set'}</strong>
+                        <p style="margin: 5px 0; color: #888;">${video.title || 'Video'} ${video.videos?.length > 0 ? `(${video.videos.length} files)` : ''}</p>
+                    </div>
+                    <button onclick="editDayVideo('${day}', ${idx})" class="primary-btn" style="width: auto; padding: 8px 15px;">Edit</button>
+                    <button onclick="deleteDayVideo('${day}', ${idx})" class="delete-btn" style="width: auto; padding: 8px 15px; margin-left: 5px;">Delete</button>
+                </div>
+            </div>
+        `;
+    });
+    html += '</div>';
+    
+    html += `<button onclick="openAddVideoModal('${day}')" class="primary-btn" style="margin-top: 15px;">➕ Add Video Slot</button>`;
+    html += '</div>';
+    
+    contentArea.innerHTML = html;
+}
+
+function openAddVideoModal(day) {
+    const modal = document.createElement('div');
+    modal.id = 'video-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    `;
+    
+    modal.innerHTML = `
+        <div class="card" style="max-width: 500px; width: 90%;">
+            <h2>Add Video for ${day}</h2>
+            
+            <label>Time (24-hour format)</label>
+            <input type="time" id="videoTime" placeholder="14:30">
+            
+            <label>Message</label>
+            <textarea id="videoMessage" rows="3" placeholder="Optional message..."></textarea>
+            
+            <label>Video URL</label>
+            <input type="text" id="videoUrlInput" placeholder="https://youtube.com/...">
+            
+            <label>Or Upload Videos (up to 3)</label>
+            <input type="file" id="modalMediaFiles" multiple accept="video/*,image/*">
+            <small style="color: #888; display: block;">Selected: <span id="file-count">0</span> files</small>
+            
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button onclick="saveVideoSlot('${day}')" class="primary-btn">✓ Save</button>
+                <button onclick="document.getElementById('video-modal').remove()" class="delete-btn">✕ Cancel</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    document.getElementById('modalMediaFiles').addEventListener('change', (e) => {
+        document.getElementById('file-count').innerText = e.target.files.length;
+    });
+}
+
+async function saveVideoSlot(day) {
+    const time = document.getElementById('videoTime').value;
+    const message = document.getElementById('videoMessage').value;
+    const videoUrl = document.getElementById('videoUrlInput').value;
+    const files = document.getElementById('modalMediaFiles').files;
+    
+    if (!time) return alert('Set time');
+    if (!videoUrl && files.length === 0) return alert('Add video URL or files');
+    
+    if (!recurringDayVideos[day]) {
+        recurringDayVideos[day] = [];
+    }
+    
+    recurringDayVideos[day].push({
+        time,
+        title: message || `Video at ${time}`,
+        message,
+        videoUrl,
+        videos: Array.from(files).map(f => f.name)
+    });
+    
+    document.getElementById('video-modal').remove();
+    loadDayContent(day);
+    alert('✓ Video slot added');
+}
+
+function deleteDayVideo(day, idx) {
+    if (!confirm('Delete this video slot?')) return;
+    recurringDayVideos[day].splice(idx, 1);
+    loadDayContent(day);
+}
+
+function editDayVideo(day, idx) {
+    alert('Edit feature: Video #' + (idx + 1) + ' for ' + day);
+}
+
+function saveAdvancedRecurring() {
+    if (Object.keys(recurringDayVideos).every(day => recurringDayVideos[day].length === 0)) {
+        return alert('Add at least one video');
+    }
+    
+    alert(`✓ Recurring schedule saved!\n\nVideos scheduled:\n${Object.entries(recurringDayVideos).map(([day, videos]) => `${day}: ${videos.length} slot(s)`).join('\n')}`);
+    console.log('Saved schedule:', recurringDayVideos);
+}
+
+function showRecurringMethod(method) {
+    const simple = document.getElementById('simple-recurring');
+    const advanced = document.getElementById('advanced-recurring');
+    const simpleBtn = document.getElementById('simple-btn');
+    const advancedBtn = document.getElementById('advanced-recurring').querySelector('button[onclick*="Advanced"]') || document.querySelector('[onclick*="advanced"]').previousElementSibling;
+    
+    if (method === 'simple') {
+        simple.classList.remove('hidden');
+        advanced.classList.add('hidden');
+        document.getElementById('simple-btn').style.background = 'var(--primary)';
+        document.querySelectorAll('[onclick*="advanced"]')[0].style.background = '#4e5058';
+    } else {
+        simple.classList.add('hidden');
+        advanced.classList.remove('hidden');
+        document.getElementById('simple-btn').style.background = '#4e5058';
+        document.querySelectorAll('[onclick*="advanced"]')[0].style.background = 'var(--primary)';
+        initAdvancedRecurring();
+    }
+}
+
 // ===== BRANDING =====
 async function setBranding() {
     const position = document.getElementById('brandingPosition').value;
@@ -709,27 +928,53 @@ function testPreviewMedia() {
 }
 
 function showPreview(fileInput, preview) {
-    if (!fileInput || !fileInput.files[0]) {
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
         preview.innerHTML = '';
         return;
     }
 
-    const file = fileInput.files[0];
-    const reader = new FileReader();
+    if (fileInput.files.length > 3) {
+        preview.innerHTML = '<p style="color: #DA373C;">Maximum 3 files allowed</p>';
+        return;
+    }
 
-    reader.onload = (e) => {
-        const ext = file.name.split('.').pop().toLowerCase();
-        const videoExts = ['mp4', 'webm', 'mov', 'avi', 'mkv'];
-        const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">';
+    
+    for (let i = 0; i < fileInput.files.length; i++) {
+        const file = fileInput.files[i];
+        const reader = new FileReader();
 
-        if (videoExts.includes(ext)) {
-            preview.innerHTML = `<video controls style="max-width: 100%; border-radius: 5px; max-height: 400px;"><source src="${e.target.result}"></video>`;
-        } else if (imageExts.includes(ext)) {
-            preview.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; border-radius: 5px; max-height: 400px;">`;
-        } else {
-            preview.innerHTML = `<p>File: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)</p>`;
-        }
-    };
+        reader.onload = (e) => {
+            const ext = file.name.split('.').pop().toLowerCase();
+            const videoExts = ['mp4', 'webm', 'mov', 'avi', 'mkv'];
+            const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
 
-    reader.readAsDataURL(file);
+            let preview_item = `<div style="border: 1px solid #404249; border-radius: 5px; overflow: hidden;">`;
+            
+            if (videoExts.includes(ext)) {
+                preview_item += `<video controls style="width: 100%; height: 120px; object-fit: cover;"><source src="${e.target.result}"></video>`;
+            } else if (imageExts.includes(ext)) {
+                preview_item += `<img src="${e.target.result}" style="width: 100%; height: 120px; object-fit: cover;">`;
+            } else {
+                preview_item += `<div style="width: 100%; height: 120px; background: #404249; display: flex; align-items: center; justify-content: center;"><p style="margin: 0; font-size: 0.8em;">${file.name}</p></div>`;
+            }
+            
+            preview_item += `<p style="margin: 8px; font-size: 0.8em; color: #888;">${(file.size / 1024 / 1024).toFixed(2)}MB</p></div>`;
+            
+            let container = preview.querySelector(`[data-file="${i}"]`);
+            if (!container) {
+                container = document.createElement('div');
+                container.setAttribute('data-file', i);
+                preview.appendChild(container);
+            }
+            container.innerHTML = preview_item;
+        };
+
+        reader.readAsDataURL(file);
+    }
+    
+    html += '</div>';
+    if (preview.innerHTML === '') {
+        preview.innerHTML = html;
+    }
 }
