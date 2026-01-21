@@ -1,74 +1,439 @@
-const express = require("express");
-const cors = require("cors");
-const multer = require("multer");
-const path = require("path");
-const { Client, GatewayIntentBits } = require("discord.js");
+const API = window.location.origin;
+let password = '';
 
-const app = express();
-const upload = multer();
+async function login() {
+    password = document.getElementById('adminPassword').value.trim();
+    
+    if (!password) {
+        alert('Enter admin password');
+        return;
+    }
 
-const PORT = process.env.PORT || 8000;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+    try {
+        console.log('Attempting login with password:', '***');
+        
+        // First check if we can reach the server
+        const health = await fetch(`${API}/health`);
+        console.log('Health check:', await health.json());
+        
+        // Try to get channels with auth
+        const res = await fetch(`${API}/api/channels`, {
+            headers: { 
+                'Authorization': password,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        console.log('Login response status:', res.status);
+        
+        if (res.status === 401 || res.status === 403) {
+            // Try debug endpoint to see what's wrong
+            const debug = await fetch(`${API}/api/debug-auth`, {
+                headers: { 'Authorization': password }
+            });
+            const debugData = await debug.json();
+            console.log('Debug auth info:', debugData);
+            
+            throw new Error('Invalid password. Check server logs for details.');
+        }
+        
+        if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(`Server error: ${errorText}`);
+        }
 
-app.use(cors());
-app.use(express.json());
-app.use(express.static("public"));
+        const channels = await res.json();
+        console.log('Channels received:', channels.length);
+        
+        // Fill all channel selects
+        const selects = ['channelSelect', 'scheduleChannelSelect', 'testChannelSelect'];
+        selects.forEach(selectId => {
+            const select = document.getElementById(selectId);
+            if (select) {
+                select.innerHTML = '<option value="">-- Select Channel --</option>' +
+                    channels.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+            }
+        });
 
-/* ---------- HEALTH ---------- */
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
-});
+        document.getElementById('login-container').classList.add('hidden');
+        document.getElementById('dashboard-container').classList.remove('hidden');
 
-/* ---------- AUTH (QUERY BASED – NO CORS ISSUES) ---------- */
-function auth(req, res, next) {
-  if (req.query.pw !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-  next();
+        // Load initial data
+        loadScheduled();
+        loadHistory();
+        
+        alert('✓ Connected to bot!');
+    } catch (err) {
+        console.error('Login error details:', err);
+        alert('Login failed: ' + err.message);
+    }
 }
 
-/* ---------- DISCORD ---------- */
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
-});
-
-let channelsCache = [];
-
-client.once("ready", async () => {
-  console.log("Discord logged in");
-
-  channelsCache = [];
-  const guilds = await client.guilds.fetch();
-
-  for (const [, g] of guilds) {
-    const guild = await g.fetch();
-    const channels = await guild.channels.fetch();
-    channels.forEach(c => {
-      if (c.isTextBased()) {
-        channelsCache.push({
-          id: c.id,
-          name: `${guild.name} / ${c.name}`
-        });
-      }
+function switchTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.add('hidden');
     });
-  }
+    
+    // Remove active class from all buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab and activate button
+    const tabElement = document.getElementById(tabName + '-tab');
+    if (tabElement) {
+        tabElement.classList.remove('hidden');
+    }
+    
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
+}
 
-  console.log("Channels loaded:", channelsCache.length);
-});
+// ===== SEND POST =====
+async function sendPost() {
+    const channelSelect = document.getElementById('channelSelect');
+    const manualChannelId = document.getElementById('manualChannelId');
+    const channelId = channelSelect.value || manualChannelId.value;
+    const message = document.getElementById('message').value;
+    const videoUrl = document.getElementById('videoUrl').value;
+    const files = document.getElementById('mediaFiles').files;
 
-client.login(DISCORD_TOKEN).catch(console.error);
+    if (!channelId) {
+        alert('Please select or enter a channel ID');
+        return;
+    }
 
-/* ---------- API ---------- */
-app.get("/api/channels", auth, (req, res) => {
-  res.json(channelsCache);
-});
+    if (!message && !videoUrl && files.length === 0) {
+        alert('Please add a message, video URL, or upload media files');
+        return;
+    }
 
-app.post("/api/post", auth, upload.none(), (req, res) => {
-  res.json({ ok: true });
-});
+    const formData = new FormData();
+    formData.append('channelId', channelId);
+    if (message) formData.append('message', message);
+    if (videoUrl) formData.append('videoUrl', videoUrl);
+    
+    for (let file of files) {
+        formData.append('mediaFiles', file);
+    }
 
-/* ---------- START ---------- */
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
+    try {
+        const res = await fetch(`${API}/api/send`, {
+            method: 'POST',
+            headers: { 'Authorization': password },
+            body: formData
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+            alert('✓ Post sent successfully!');
+            // Clear form
+            document.getElementById('message').value = '';
+            document.getElementById('videoUrl').value = '';
+            document.getElementById('mediaFiles').value = '';
+            document.getElementById('preview-container').innerHTML = '';
+            // Refresh history
+            loadHistory();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to send post'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+// ===== SCHEDULE POST =====
+async function schedulePost() {
+    const channelSelect = document.getElementById('scheduleChannelSelect');
+    const manualChannelId = document.getElementById('scheduleManualChannelId');
+    const channelId = channelSelect.value || manualChannelId.value;
+    const message = document.getElementById('scheduleMessage').value;
+    const videoUrl = document.getElementById('scheduleVideoUrl').value;
+    const scheduleTime = document.getElementById('scheduleTime').value;
+    const files = document.getElementById('scheduleMediaFiles').files;
+
+    if (!channelId) {
+        alert('Please select or enter a channel ID');
+        return;
+    }
+
+    if (!scheduleTime) {
+        alert('Please select a schedule time');
+        return;
+    }
+
+    if (!message && !videoUrl && files.length === 0) {
+        alert('Please add a message, video URL, or upload media files');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('channelId', channelId);
+    formData.append('scheduleTime', scheduleTime);
+    if (message) formData.append('message', message);
+    if (videoUrl) formData.append('videoUrl', videoUrl);
+    
+    for (let file of files) {
+        formData.append('mediaFiles', file);
+    }
+
+    try {
+        const res = await fetch(`${API}/api/schedule`, {
+            method: 'POST',
+            headers: { 'Authorization': password },
+            body: formData
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+            alert('✓ Post scheduled successfully!');
+            // Clear form
+            document.getElementById('scheduleMessage').value = '';
+            document.getElementById('scheduleVideoUrl').value = '';
+            document.getElementById('scheduleTime').value = '';
+            document.getElementById('scheduleMediaFiles').value = '';
+            document.getElementById('schedulePreview').innerHTML = '';
+            // Refresh scheduled posts
+            loadScheduled();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to schedule post'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+// ===== LOAD SCHEDULED POSTS =====
+async function loadScheduled() {
+    try {
+        const res = await fetch(`${API}/api/scheduled`, {
+            headers: { 'Authorization': password }
+        });
+        
+        if (!res.ok) {
+            console.error('Failed to load scheduled posts:', res.status);
+            return;
+        }
+        
+        const posts = await res.json();
+        const container = document.getElementById('scheduled-posts');
+
+        if (!posts || posts.length === 0) {
+            container.innerHTML = '<p style="color: #888;">No scheduled posts</p>';
+            return;
+        }
+
+        container.innerHTML = posts.map(post => `
+            <div class="scheduled-item">
+                <div>
+                    <strong>Scheduled for: ${new Date(post.scheduleTime).toLocaleString()}</strong>
+                    <p>Channel: ${post.channelId}</p>
+                    ${post.message ? `<p>Message: ${post.message}</p>` : ''}
+                    ${post.videoUrl ? `<p>Video URL: ${post.videoUrl}</p>` : ''}
+                    ${post.files && post.files.length > 0 ? `<p>Files: ${post.files.length} file(s)</p>` : ''}
+                    <small>Created: ${new Date(post.createdAt).toLocaleString()}</small>
+                </div>
+                <button class="delete-btn" onclick="deleteScheduled('${post.id}')">Delete</button>
+            </div>
+        `).join('');
+    } catch (err) {
+        console.error('Error loading scheduled posts:', err);
+    }
+}
+
+async function deleteScheduled(id) {
+    if (!confirm('Are you sure you want to delete this scheduled post?')) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API}/api/scheduled/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': password }
+        });
+        
+        if (res.ok) {
+            loadScheduled();
+        } else {
+            alert('Failed to delete scheduled post');
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+// ===== LOAD HISTORY =====
+async function loadHistory() {
+    try {
+        const res = await fetch(`${API}/api/history`, {
+            headers: { 'Authorization': password }
+        });
+        
+        if (!res.ok) {
+            console.error('Failed to load history:', res.status);
+            return;
+        }
+        
+        const posts = await res.json();
+        const container = document.getElementById('history-container');
+
+        if (!posts || posts.length === 0) {
+            container.innerHTML = '<p style="color: #888;">No history yet</p>';
+            return;
+        }
+
+        // Show most recent 20 posts
+        const recentPosts = posts.slice(-20).reverse();
+        
+        container.innerHTML = recentPosts.map(post => `
+            <div class="history-item">
+                <strong>${post.scheduled ? '[SCHEDULED] ' : ''}${new Date(post.sentAt).toLocaleString()}</strong>
+                <p>Channel: ${post.channelId}</p>
+                ${post.message ? `<p>Message: ${post.message}</p>` : ''}
+                ${post.filesCount > 0 ? `<p>Files: ${post.filesCount} file(s)</p>` : ''}
+            </div>
+        `).join('');
+    } catch (err) {
+        console.error('Error loading history:', err);
+    }
+}
+
+// ===== TEST SEND =====
+async function testSend() {
+    const channelSelect = document.getElementById('testChannelSelect');
+    const manualChannelId = document.getElementById('testManualChannelId');
+    const channelId = channelSelect.value || manualChannelId.value;
+    const testMessage = document.getElementById('testMessage').value;
+
+    if (!channelId) {
+        alert('Please select or enter a channel ID');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API}/api/test`, {
+            method: 'POST',
+            headers: {
+                'Authorization': password,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                channelId: channelId,
+                message: testMessage
+            })
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+            alert('✓ Test message sent successfully!');
+            document.getElementById('testMessage').value = '';
+        } else {
+            alert('Error: ' + (data.error || 'Failed to send test'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+// ===== MEDIA PREVIEW =====
+if (document.getElementById('mediaFiles')) {
+    document.getElementById('mediaFiles').addEventListener('change', previewMedia);
+}
+if (document.getElementById('scheduleMediaFiles')) {
+    document.getElementById('scheduleMediaFiles').addEventListener('change', schedulePreviewMedia);
+}
+
+function previewMedia() {
+    const files = document.getElementById('mediaFiles').files;
+    const container = document.getElementById('preview-container');
+    showPreviews(files, container);
+}
+
+function schedulePreviewMedia() {
+    const files = document.getElementById('scheduleMediaFiles').files;
+    const container = document.getElementById('schedulePreview');
+    showPreviews(files, container);
+}
+
+function showPreviews(files, container) {
+    if (files.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = '<h4>Preview (' + files.length + ' file(s)):</h4>';
+    html += '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px;">';
+    
+    for (let file of files) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const isVideo = file.type.includes('video');
+            const isImage = file.type.includes('image');
+            
+            let preview = '';
+            if (isVideo) {
+                preview = `
+                    <div style="background: #1e1f22; padding: 10px; border-radius: 5px;">
+                        <video controls style="width: 100%; height: 100px; object-fit: cover; border-radius: 5px;">
+                            <source src="${e.target.result}" type="${file.type}">
+                        </video>
+                        <small style="display: block; margin-top: 5px; text-align: center;">${file.name}</small>
+                    </div>
+                `;
+            } else if (isImage) {
+                preview = `
+                    <div style="background: #1e1f22; padding: 10px; border-radius: 5px;">
+                        <img src="${e.target.result}" style="width: 100%; height: 100px; object-fit: cover; border-radius: 5px;">
+                        <small style="display: block; margin-top: 5px; text-align: center;">${file.name}</small>
+                    </div>
+                `;
+            } else {
+                preview = `
+                    <div style="background: #1e1f22; padding: 10px; border-radius: 5px; height: 120px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                        <div style="font-size: 2em;">📁</div>
+                        <small style="text-align: center; word-break: break-all;">${file.name}</small>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML += preview;
+        };
+        reader.readAsDataURL(file);
+    }
+    
+    container.innerHTML = html + '</div>';
+}
+
+// Set minimum datetime to current time
+function setMinDateTime() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    
+    const minDateTime = `${year}-${month}-${day}T${hours}:${minutes}`;
+    const scheduleTimeInput = document.getElementById('scheduleTime');
+    if (scheduleTimeInput) {
+        scheduleTimeInput.min = minDateTime;
+    }
+}
+
+// Initialize when page loads
+window.onload = function() {
+    setMinDateTime();
+    
+    // Add event listener for tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const tabName = this.textContent.toLowerCase();
+            switchTab(tabName.split(' ')[0]); // Get first word
+        });
+    });
+};
