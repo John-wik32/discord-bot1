@@ -26,8 +26,10 @@ const ANALYTICS_FILE = path.join(__dirname, 'analytics.json');
 const BRANDING_FILE = path.join(__dirname, 'branding.json');
 const RECURRING_FILE = path.join(__dirname, 'recurring.json');
 
+const SUGGESTIONS_FILE = path.join(__dirname, 'suggestions.json');
+
 // Initialize files
-[SCHEDULE_FILE, QUEUE_FILE, LIBRARY_FILE, TEMPLATES_FILE, HISTORY_FILE, ANALYTICS_FILE, BRANDING_FILE, RECURRING_FILE].forEach(file => {
+[SCHEDULE_FILE, QUEUE_FILE, LIBRARY_FILE, TEMPLATES_FILE, HISTORY_FILE, ANALYTICS_FILE, BRANDING_FILE, RECURRING_FILE, SUGGESTIONS_FILE].forEach(file => {
     if (!fs.existsSync(file)) {
         fs.writeFileSync(file, JSON.stringify(file.includes('templates') ? [] : {}));
     }
@@ -251,6 +253,54 @@ const checkAuth = (req, res, next) => {
 // --- ROUTES ---
 app.get('/', (req, res) => res.sendFile(path.join(publicPath, 'index.html')));
 app.get('/health', (req, res) => res.status(200).json({ status: 'OK', bot: client.user ? 'Online' : 'Offline' }));
+
+// SUGGESTIONS ENDPOINTS
+app.post('/api/suggestions', async (req, res) => {
+    try {
+        const { idea, details, userName } = req.body;
+        
+        if (!idea) {
+            return res.status(400).json({ error: 'Idea required' });
+        }
+
+        const suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+        
+        suggestions.push({
+            id: Date.now(),
+            idea,
+            details: details || '',
+            userName: userName || 'Anonymous',
+            createdAt: new Date().toISOString(),
+            status: 'new'
+        });
+
+        fs.writeFileSync(SUGGESTIONS_FILE, JSON.stringify(suggestions, null, 2));
+        res.json({ success: true, message: 'Suggestion submitted! Thank you!' });
+    } catch (err) {
+        console.error("Suggestion error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/suggestions', checkAuth, (req, res) => {
+    try {
+        const suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+        res.json(suggestions);
+    } catch (err) {
+        res.json([]);
+    }
+});
+
+app.delete('/api/suggestions/:id', checkAuth, (req, res) => {
+    try {
+        let suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+        suggestions = suggestions.filter(s => s.id != req.params.id);
+        fs.writeFileSync(SUGGESTIONS_FILE, JSON.stringify(suggestions, null, 2));
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 app.get('/api/channels', checkAuth, async (req, res) => {
     try {
@@ -726,6 +776,45 @@ client.once('ready', () => {
         });
         console.log(`✓ Available channels: ${channels.length}`);
     }, 1000);
+});
+
+client.on('messageCreate', async (msg) => {
+    try {
+        if (msg.author.bot) return;
+        
+        // Handle !suggest command
+        if (msg.content.startsWith('!suggest')) {
+            const args = msg.content.slice(8).trim();
+            
+            if (!args) {
+                return msg.reply('Usage: `!suggest [idea], [other details]`\nExample: `!suggest Add dark mode, Make the dashboard darker`');
+            }
+
+            const parts = args.split(',');
+            const idea = parts[0].trim();
+            const details = parts[1]?.trim() || '';
+
+            try {
+                const suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+                
+                suggestions.push({
+                    id: Date.now(),
+                    idea,
+                    details,
+                    userName: msg.author.username,
+                    createdAt: new Date().toISOString(),
+                    status: 'new'
+                });
+
+                fs.writeFileSync(SUGGESTIONS_FILE, JSON.stringify(suggestions, null, 2));
+                msg.reply(`✓ Suggestion received! Thank you for the idea!\n> **${idea}**`);
+            } catch (err) {
+                msg.reply('Error saving suggestion');
+            }
+        }
+    } catch (err) {
+        console.error("Message handler error:", err);
+    }
 });
 
 client.on('error', err => console.error('Discord error:', err));
