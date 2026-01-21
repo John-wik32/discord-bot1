@@ -12,7 +12,7 @@ async function login() {
 
     console.log('🔐 Attempting login...');
     console.log('   API URL:', API);
-    console.log('   Password length:', password.length);
+    console.log('   Password entered');
 
     try {
         // First check if server is reachable
@@ -22,25 +22,10 @@ async function login() {
         console.log('   Health check:', healthData);
 
         if (!healthRes.ok) {
-            throw new Error('Server is not responding properly');
+            throw new Error('Server is not responding');
         }
 
-        // Try debug endpoint first to see auth status
-        console.log('🔍 Testing auth with debug endpoint...');
-        const debugRes = await fetch(`${API}/api/debug-auth`, {
-            headers: { 
-                'Authorization': password
-            }
-        });
-        
-        const debugData = await debugRes.json();
-        console.log('   Debug auth result:', debugData);
-
-        if (!debugRes.ok || !debugData.matches) {
-            throw new Error(`Authentication failed. Check that password is correct.`);
-        }
-
-        // Now try to get channels
+        // Try to get channels
         console.log('📡 Fetching channels...');
         const res = await fetch(`${API}/api/channels`, {
             headers: { 
@@ -50,24 +35,21 @@ async function login() {
         
         console.log('   Channels response status:', res.status);
         
+        if (res.status === 401 || res.status === 403) {
+            throw new Error('Wrong password. Try: 123test');
+        }
+        
         if (!res.ok) {
             const errorText = await res.text();
-            throw new Error(`Failed to get channels: ${res.status} ${errorText}`);
+            throw new Error(`Server error: ${res.status}`);
         }
 
         const channels = await res.json();
-        console.log(`   Received ${channels.length} channels`);
-
-        // Fill all channel selects
-        const selects = ['channelSelect', 'scheduleChannelSelect', 'testChannelSelect'];
-        selects.forEach(selectId => {
-            const select = document.getElementById(selectId);
-            if (select) {
-                select.innerHTML = '<option value="">-- Select Channel --</option>' +
-                    channels.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-            }
-        });
-
+        console.log(`✅ Received ${channels.length} channels`);
+        
+        // Update channel dropdowns
+        updateChannelDropdowns(channels);
+        
         // Show dashboard
         document.getElementById('login-container').classList.add('hidden');
         document.getElementById('dashboard-container').classList.remove('hidden');
@@ -76,12 +58,67 @@ async function login() {
         await loadScheduled();
         await loadHistory();
         
-        alert('✅ Connected to bot successfully!');
+        alert(`✅ Connected! Found ${channels.length} channels`);
         
     } catch (err) {
         console.error('❌ Login error:', err);
-        alert('Login failed: ' + err.message + '\n\nCheck browser console for details.');
+        alert('Login failed: ' + err.message);
     }
+}
+
+function updateChannelDropdowns(channels) {
+    // Fill all channel selects
+    const selects = ['channelSelect', 'scheduleChannelSelect', 'testChannelSelect'];
+    
+    selects.forEach(selectId => {
+        const select = document.getElementById(selectId);
+        if (select) {
+            // Clear existing options
+            select.innerHTML = '<option value="">-- Select a Channel --</option>';
+            
+            // Group by guild
+            const guilds = {};
+            channels.forEach(channel => {
+                if (!guilds[channel.guildName]) {
+                    guilds[channel.guildName] = [];
+                }
+                guilds[channel.guildName].push(channel);
+            });
+            
+            // Add options grouped by guild
+            Object.keys(guilds).forEach(guildName => {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = guildName;
+                
+                guilds[guildName].forEach(channel => {
+                    const option = document.createElement('option');
+                    option.value = channel.id;
+                    option.textContent = `#${channel.channelName}`;
+                    optgroup.appendChild(option);
+                });
+                
+                select.appendChild(optgroup);
+            });
+            
+            // Add manual input option
+            const manualOption = document.createElement('option');
+            manualOption.value = 'manual';
+            manualOption.textContent = '-- Enter Channel ID Manually --';
+            select.appendChild(manualOption);
+            
+            // Add change listener to show manual input
+            select.addEventListener('change', function() {
+                const manualInputId = selectId.replace('Select', 'ManualChannelId');
+                const manualInput = document.getElementById(manualInputId);
+                if (manualInput) {
+                    manualInput.style.display = this.value === 'manual' ? 'block' : 'none';
+                    if (this.value !== 'manual') {
+                        manualInput.value = '';
+                    }
+                }
+            });
+        }
+    });
 }
 
 function switchTab(tabName) {
@@ -101,16 +138,27 @@ function switchTab(tabName) {
         tabElement.classList.remove('hidden');
     }
     
-    if (event && event.target) {
-        event.target.classList.add('active');
-    }
+    // Find and activate the clicked button
+    const buttons = document.querySelectorAll('.tab-btn');
+    buttons.forEach(btn => {
+        if (btn.textContent.toLowerCase().includes(tabName)) {
+            btn.classList.add('active');
+        }
+    });
 }
 
 // ===== SEND POST =====
 async function sendPost() {
     const channelSelect = document.getElementById('channelSelect');
     const manualChannelId = document.getElementById('manualChannelId');
-    const channelId = channelSelect.value || manualChannelId.value.trim();
+    let channelId = '';
+    
+    if (channelSelect.value === 'manual') {
+        channelId = manualChannelId.value.trim();
+    } else {
+        channelId = channelSelect.value;
+    }
+    
     const message = document.getElementById('message').value.trim();
     const videoUrl = document.getElementById('videoUrl').value.trim();
     const files = document.getElementById('mediaFiles').files;
@@ -127,8 +175,6 @@ async function sendPost() {
 
     console.log('📤 Preparing to send post...');
     console.log('   Channel ID:', channelId);
-    console.log('   Message:', message || '(none)');
-    console.log('   Video URL:', videoUrl || '(none)');
     console.log('   Files:', files.length);
 
     const formData = new FormData();
@@ -171,7 +217,14 @@ async function sendPost() {
 async function schedulePost() {
     const channelSelect = document.getElementById('scheduleChannelSelect');
     const manualChannelId = document.getElementById('scheduleManualChannelId');
-    const channelId = channelSelect.value || manualChannelId.value.trim();
+    let channelId = '';
+    
+    if (channelSelect.value === 'manual') {
+        channelId = manualChannelId.value.trim();
+    } else {
+        channelId = channelSelect.value;
+    }
+    
     const message = document.getElementById('scheduleMessage').value.trim();
     const videoUrl = document.getElementById('scheduleVideoUrl').value.trim();
     const scheduleTime = document.getElementById('scheduleTime').value;
@@ -227,7 +280,12 @@ async function schedulePost() {
             // Refresh scheduled posts
             await loadScheduled();
         } else {
-            alert('❌ Error: ' + (data.error || 'Failed to schedule post'));
+            let errorMsg = data.error || 'Failed to schedule post';
+            if (data.difference) {
+                errorMsg += `\nTime difference: ${Math.round(data.difference/1000)} seconds`;
+                errorMsg += `\nNeed at least 60 seconds in future`;
+            }
+            alert('❌ Error: ' + errorMsg);
         }
     } catch (err) {
         console.error('Schedule error:', err);
@@ -264,7 +322,7 @@ async function loadScheduled() {
             <div class="scheduled-item">
                 <div>
                     <strong>📅 ${new Date(post.scheduleTime).toLocaleString()}</strong>
-                    <p>Channel ID: ${post.channelId}</p>
+                    <p>Channel: ${post.channelId}</p>
                     ${post.message ? `<p>${post.message}</p>` : ''}
                     ${post.videoUrl ? `<p><a href="${post.videoUrl}" target="_blank">Video Link</a></p>` : ''}
                     ${post.files && post.files.length > 0 ? `<p>📎 ${post.files.length} file(s)</p>` : ''}
@@ -341,40 +399,53 @@ async function loadHistory() {
     }
 }
 
-// ===== TEST SEND =====
+// ===== TEST SEND WITH FILES =====
 async function testSend() {
     const channelSelect = document.getElementById('testChannelSelect');
     const manualChannelId = document.getElementById('testManualChannelId');
-    const channelId = channelSelect.value || manualChannelId.value.trim();
+    let channelId = '';
+    
+    if (channelSelect.value === 'manual') {
+        channelId = manualChannelId.value.trim();
+    } else {
+        channelId = channelSelect.value;
+    }
+    
     const testMessage = document.getElementById('testMessage').value.trim();
+    const testFiles = document.getElementById('testMediaFiles').files;
 
     if (!channelId) {
         alert('Please select or enter a channel ID');
         return;
     }
 
-    console.log('🧪 Sending test message...');
+    console.log('🧪 Sending test with files...');
     console.log('   Channel ID:', channelId);
     console.log('   Test message:', testMessage || '(default)');
+    console.log('   Files:', testFiles.length);
+
+    const formData = new FormData();
+    formData.append('channelId', channelId);
+    if (testMessage) formData.append('message', testMessage);
+    
+    for (let file of testFiles) {
+        formData.append('mediaFiles', file);
+    }
 
     try {
         const res = await fetch(`${API}/api/test`, {
             method: 'POST',
-            headers: {
-                'Authorization': password,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                channelId: channelId,
-                message: testMessage
-            })
+            headers: { 'Authorization': password },
+            body: formData
         });
         
         const data = await res.json();
         
         if (res.ok) {
-            alert('✅ Test message sent successfully!');
+            alert(`✅ Test message sent successfully!${data.filesCount ? `\nWith ${data.filesCount} file(s)` : ''}`);
             document.getElementById('testMessage').value = '';
+            document.getElementById('testMediaFiles').value = '';
+            document.getElementById('testPreview').innerHTML = '';
         } else {
             alert('❌ Error: ' + (data.error || 'Failed to send test'));
         }
@@ -384,109 +455,17 @@ async function testSend() {
     }
 }
 
-// ===== MEDIA PREVIEW =====
+// ===== MEDIA PREVIEW FUNCTIONS =====
 document.addEventListener('DOMContentLoaded', function() {
-    const mediaFiles = document.getElementById('mediaFiles');
-    const scheduleMediaFiles = document.getElementById('scheduleMediaFiles');
+    // Set up file previews
+    setupFilePreview('mediaFiles', 'preview-container');
+    setupFilePreview('scheduleMediaFiles', 'schedulePreview');
+    setupFilePreview('testMediaFiles', 'testPreview');
     
-    if (mediaFiles) {
-        mediaFiles.addEventListener('change', previewMedia);
-    }
-    if (scheduleMediaFiles) {
-        scheduleMediaFiles.addEventListener('change', schedulePreviewMedia);
-    }
-});
-
-function previewMedia() {
-    const files = document.getElementById('mediaFiles').files;
-    const container = document.getElementById('preview-container');
-    showPreviews(files, container);
-}
-
-function schedulePreviewMedia() {
-    const files = document.getElementById('scheduleMediaFiles').files;
-    const container = document.getElementById('schedulePreview');
-    showPreviews(files, container);
-}
-
-function showPreviews(files, container) {
-    if (files.length === 0) {
-        container.innerHTML = '';
-        return;
-    }
-
-    let html = `<h4>📁 Preview (${files.length} file${files.length > 1 ? 's' : ''}):</h4>`;
-    html += '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px;">';
-    
-    Array.from(files).forEach(file => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const isVideo = file.type.includes('video');
-            const isImage = file.type.includes('image');
-            
-            let preview = '';
-            if (isVideo) {
-                preview = `
-                    <div style="background: #1e1f22; padding: 10px; border-radius: 5px;">
-                        <video controls style="width: 100%; height: 100px; object-fit: cover; border-radius: 5px;">
-                            <source src="${e.target.result}" type="${file.type}">
-                        </video>
-                        <small style="display: block; margin-top: 5px; text-align: center; word-break: break-all;">${file.name}</small>
-                    </div>
-                `;
-            } else if (isImage) {
-                preview = `
-                    <div style="background: #1e1f22; padding: 10px; border-radius: 5px;">
-                        <img src="${e.target.result}" style="width: 100%; height: 100px; object-fit: cover; border-radius: 5px;">
-                        <small style="display: block; margin-top: 5px; text-align: center; word-break: break-all;">${file.name}</small>
-                    </div>
-                `;
-            } else {
-                preview = `
-                    <div style="background: #1e1f22; padding: 10px; border-radius: 5px; height: 120px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
-                        <div style="font-size: 2em;">📁</div>
-                        <small style="text-align: center; word-break: break-all;">${file.name}</small>
-                    </div>
-                `;
-            }
-            
-            container.innerHTML += preview;
-        };
-        reader.readAsDataURL(file);
-    });
-    
-    container.innerHTML = html + '</div>';
-}
-
-// Set minimum datetime to current time
-function setMinDateTime() {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    
-    const minDateTime = `${year}-${month}-${day}T${hours}:${minutes}`;
-    const scheduleTimeInput = document.getElementById('scheduleTime');
-    if (scheduleTimeInput) {
-        scheduleTimeInput.min = minDateTime;
-        // Set default to 5 minutes from now
-        const defaultTime = new Date(now.getTime() + 5 * 60000);
-        const defaultYear = defaultTime.getFullYear();
-        const defaultMonth = String(defaultTime.getMonth() + 1).padStart(2, '0');
-        const defaultDay = String(defaultTime.getDate()).padStart(2, '0');
-        const defaultHours = String(defaultTime.getHours()).padStart(2, '0');
-        const defaultMinutes = String(defaultTime.getMinutes()).padStart(2, '0');
-        scheduleTimeInput.value = `${defaultYear}-${defaultMonth}-${defaultDay}T${defaultHours}:${defaultMinutes}`;
-    }
-}
-
-// Add click handlers to tab buttons
-document.addEventListener('DOMContentLoaded', function() {
+    // Set minimum datetime to 1 minute from now
     setMinDateTime();
     
-    // Add event listeners for tab buttons
+    // Add tab button listeners
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             const text = this.textContent.trim().toLowerCase();
@@ -513,4 +492,118 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+    
+    // Set default schedule time to 5 minutes from now
+    const scheduleTimeInput = document.getElementById('scheduleTime');
+    if (scheduleTimeInput) {
+        const now = new Date();
+        const future = new Date(now.getTime() + 5 * 60000); // 5 minutes
+        scheduleTimeInput.value = formatDateTimeLocal(future);
+    }
 });
+
+function setupFilePreview(inputId, previewId) {
+    const input = document.getElementById(inputId);
+    const preview = document.getElementById(previewId);
+    
+    if (input && preview) {
+        input.addEventListener('change', function() {
+            showPreviews(this.files, preview);
+        });
+    }
+}
+
+function showPreviews(files, container) {
+    if (files.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = `<div class="preview-header">📁 Selected Files (${files.length}):</div>`;
+    html += '<div class="preview-grid">';
+    
+    Array.from(files).forEach((file, index) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const isVideo = file.type.includes('video');
+            const isImage = file.type.includes('image');
+            
+            let preview = '';
+            if (isVideo) {
+                preview = `
+                    <div class="preview-item">
+                        <div class="preview-video">
+                            <video controls>
+                                <source src="${e.target.result}" type="${file.type}">
+                            </video>
+                        </div>
+                        <div class="preview-info">
+                            <div class="file-name">${file.name}</div>
+                            <div class="file-size">${formatFileSize(file.size)}</div>
+                        </div>
+                    </div>
+                `;
+            } else if (isImage) {
+                preview = `
+                    <div class="preview-item">
+                        <div class="preview-image">
+                            <img src="${e.target.result}" alt="${file.name}">
+                        </div>
+                        <div class="preview-info">
+                            <div class="file-name">${file.name}</div>
+                            <div class="file-size">${formatFileSize(file.size)}</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                preview = `
+                    <div class="preview-item">
+                        <div class="preview-other">
+                            <div class="file-icon">📄</div>
+                        </div>
+                        <div class="preview-info">
+                            <div class="file-name">${file.name}</div>
+                            <div class="file-size">${formatFileSize(file.size)}</div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Append to existing previews
+            const previewDiv = document.createElement('div');
+            previewDiv.innerHTML = preview;
+            container.appendChild(previewDiv.firstChild);
+        };
+        reader.readAsDataURL(file);
+    });
+    
+    container.innerHTML = html + '</div>';
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function formatDateTimeLocal(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function setMinDateTime() {
+    const now = new Date();
+    const minDate = new Date(now.getTime() + 60000); // 1 minute from now
+    
+    const scheduleTimeInput = document.getElementById('scheduleTime');
+    if (scheduleTimeInput) {
+        scheduleTimeInput.min = formatDateTimeLocal(minDate);
+    }
+}
