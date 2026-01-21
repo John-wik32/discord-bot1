@@ -1,389 +1,828 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discord Bot Manager Pro</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-    <!-- LOGIN SCREEN -->
-    <div id="login-container" class="card-container">
-        <div class="card login-card">
-            <h1>🤖 Bot Command Center Pro</h1>
-            <p style="color: #888;">Enter your admin password</p>
-            <input type="password" id="adminPassword" placeholder="Admin Password">
-            <button onclick="fetchChannels()">Connect to Bot</button>
-        </div>
-    </div>
+const { Client, GatewayIntentBits, AttachmentBuilder } = require('discord.js');
+const express = require('express');
+const path = require('path');
+const cors = require('cors');
+const multer = require('multer');
+const fs = require('fs');
 
-    <!-- DASHBOARD -->
-    <div id="dashboard-container" class="hidden">
-        <div class="dashboard-header">
-            <h1>🤖 Bot Command Center Pro</h1>
-            <button class="logout-btn" onclick="location.reload()">Logout</button>
-        </div>
+const app = express();
 
-        <!-- TAB NAVIGATION -->
-        <div class="tab-buttons">
-            <button class="tab-btn active" onclick="switchTab('send')">📤 Send</button>
-            <button class="tab-btn" onclick="switchTab('schedule')">⏰ Schedule</button>
-            <button class="tab-btn" onclick="switchTab('batch')">📦 Batch</button>
-            <button class="tab-btn" onclick="switchTab('queue')">📋 Queue</button>
-            <button class="tab-btn" onclick="switchTab('library')">📚 Library</button>
-            <button class="tab-btn" onclick="switchTab('recurring')">🔄 Recurring</button>
-            <button class="tab-btn" onclick="switchTab('templates')">🎨 Templates</button>
-            <button class="tab-btn" onclick="switchTab('branding')">🎭 Branding</button>
-            <button class="tab-btn" onclick="switchTab('scheduled')">✅ Scheduled</button>
-            <button class="tab-btn" onclick="switchTab('analytics')">📊 Analytics</button>
-            <button class="tab-btn" onclick="switchTab('history')">📜 History</button>
-            <button class="tab-btn" onclick="switchTab('test')">🧪 Test</button>
-        </div>
+// Update multer to handle multiple files
+const upload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 25 * 1024 * 1024 }
+});
 
-        <!-- SEND TAB -->
-        <div id="send-tab" class="tab-content">
-            <div class="card">
-                <h2>📤 Send Post Now</h2>
-                
-                <label>Select Channel *</label>
-                <select id="channelSelect" onchange="setGuildFromChannel('channelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
-                
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="manualChannelId" placeholder="Paste channel ID here...">
+// --- CONFIG ---
+const PORT = process.env.PORT || 8000;
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'defaultPassword';
+const SCHEDULE_FILE = path.join(__dirname, 'schedule.json');
+const QUEUE_FILE = path.join(__dirname, 'queue.json');
+const LIBRARY_FILE = path.join(__dirname, 'library.json');
+const TEMPLATES_FILE = path.join(__dirname, 'templates.json');
+const HISTORY_FILE = path.join(__dirname, 'history.json');
+const ANALYTICS_FILE = path.join(__dirname, 'analytics.json');
+const BRANDING_FILE = path.join(__dirname, 'branding.json');
+const RECURRING_FILE = path.join(__dirname, 'recurring.json');
 
-                <label>Video URL (YouTube, Twitch, etc.)</label>
-                <input type="text" id="videoUrl" placeholder="https://youtube.com/watch?v=...">
+const SUGGESTIONS_FILE = path.join(__dirname, 'suggestions.json');
 
-                <label>Message Content</label>
-                <textarea id="postContent" rows="4" placeholder="Enter your message..."></textarea>
+// Initialize files
+[SCHEDULE_FILE, QUEUE_FILE, LIBRARY_FILE, TEMPLATES_FILE, HISTORY_FILE, ANALYTICS_FILE, BRANDING_FILE, RECURRING_FILE, SUGGESTIONS_FILE].forEach(file => {
+    if (!fs.existsSync(file)) {
+        fs.writeFileSync(file, JSON.stringify(file.includes('templates') ? [] : {}));
+    }
+});
 
-                <label>Add Media (Optional - Up to 3 files)</label>
-                <input type="file" id="mediaFile" onchange="previewMedia()" multiple accept="video/*,image/*">
-                <small style="color: #888;">Max 3 files, 25MB each</small>
-                <div id="preview-container"></div>
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+const publicPath = path.resolve(__dirname, 'public');
+app.use(express.static(publicPath));
 
-                <button onclick="sendPost()" class="primary-btn">🚀 Send Now</button>
-            </div>
-        </div>
+// --- UTILITIES ---
+const saveHistory = (channelId, videoTitle, url, hasMedia, scheduledFor = null) => {
+    try {
+        const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8') || '{}');
+        if (!history.entries) history.entries = [];
+        history.entries.push({
+            channelId,
+            videoTitle,
+            url,
+            hasMedia,
+            sentAt: new Date().toISOString(),
+            scheduledFor
+        });
+        if (history.entries.length > 500) history.entries.shift();
+        fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
+        updateAnalytics();
+    } catch (err) {
+        console.error("History save error:", err);
+    }
+};
 
-        <!-- SCHEDULE TAB -->
-        <div id="schedule-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>⏰ Schedule Post</h2>
-                
-                <label>Select Channel *</label>
-                <select id="scheduleChannelSelect" onchange="setGuildFromChannel('scheduleChannelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
-                
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="scheduleManualChannelId" placeholder="Paste channel ID here...">
+const updateAnalytics = () => {
+    try {
+        const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8') || '{}');
+        const entries = history.entries || [];
+        const analytics = {
+            totalPosts: entries.length,
+            postsToday: entries.filter(e => {
+                const today = new Date().toDateString();
+                return new Date(e.sentAt).toDateString() === today;
+            }).length,
+            postsThisWeek: entries.filter(e => {
+                const week = new Date();
+                week.setDate(week.getDate() - 7);
+                return new Date(e.sentAt) > week;
+            }).length,
+            postsThisMonth: entries.filter(e => {
+                const month = new Date();
+                month.setMonth(month.getMonth() - 1);
+                return new Date(e.sentAt) > month;
+            }).length,
+            channelStats: {},
+            lastUpdated: new Date().toISOString()
+        };
 
-                <label>Video URL (Optional)</label>
-                <input type="text" id="scheduleVideoUrl" placeholder="https://youtube.com/watch?v=...">
+        entries.forEach(e => {
+            if (!analytics.channelStats[e.channelId]) {
+                analytics.channelStats[e.channelId] = 0;
+            }
+            analytics.channelStats[e.channelId]++;
+        });
 
-                <label>Message Content</label>
-                <textarea id="schedulePostContent" rows="4" placeholder="Enter your message..."></textarea>
+        fs.writeFileSync(ANALYTICS_FILE, JSON.stringify(analytics, null, 2));
+    } catch (err) {
+        console.error("Analytics update error:", err);
+    }
+};
 
-                <label>Add Media (Optional - Up to 3 files)</label>
-                <input type="file" id="scheduleMediaFile" onchange="schedulePreviewMedia()" multiple accept="video/*,image/*">
-                <small style="color: #888;">Max 3 files, 25MB each</small>
-                <div id="schedulePreview"></div>
+const getYouTubeThumbnail = (url) => {
+    try {
+        const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
+        if (match) return `https://img.youtube.com/vi/${match[1]}/hqdefault.jpg`;
+    } catch (err) {}
+    return null;
+};
 
-                <label>Schedule Time (Same day or later) *</label>
-                <input type="datetime-local" id="scheduleTime">
+// --- SCHEDULER LOGIC ---
+let schedulerActive = false;
 
-                <button onclick="schedulePost()" class="primary-btn">📅 Schedule Post</button>
-            </div>
-        </div>
+const checkAndSendSchedules = async () => {
+    if (schedulerActive || !client.user) return;
+    schedulerActive = true;
+    
+    try {
+        const data = fs.readFileSync(SCHEDULE_FILE, 'utf-8');
+        let tasks = JSON.parse(data || '[]');
+        const now = Date.now();
+        const remainingTasks = [];
 
-        <!-- BATCH UPLOAD TAB -->
-        <div id="batch-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>📦 Batch Upload & Auto-Schedule</h2>
-                <p style="color: #888;">Upload multiple videos and auto-schedule them</p>
-                
-                <label>Select Channel *</label>
-                <select id="batchChannelSelect" onchange="setGuildFromChannel('batchChannelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
-                
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="batchManualChannelId" placeholder="Paste channel ID here...">
-
-                <label>Select Multiple Videos *</label>
-                <input type="file" id="batchFiles" multiple accept="video/*,image/*">
-                <small style="color: #888;">Select 2+ files</small>
-
-                <label>Post Interval (hours) *</label>
-                <input type="number" id="batchInterval" min="1" value="2" placeholder="Hours between posts">
-
-                <label>Start Time *</label>
-                <input type="datetime-local" id="batchStartTime">
-
-                <button onclick="batchUpload()" class="primary-btn">📅 Schedule All</button>
-            </div>
-        </div>
-
-        <!-- QUEUE TAB -->
-        <div id="queue-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>📋 Video Queue</h2>
-                <p style="color: #888;">Videos auto-post in sequence</p>
-                
-                <label>Select Channel *</label>
-                <select id="queueChannelSelect" onchange="setGuildFromChannel('queueChannelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
-                
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="queueManualChannelId" placeholder="Paste channel ID here...">
-
-                <label>Video Title</label>
-                <input type="text" id="queueTitle" placeholder="Video title...">
-
-                <label>Custom Message</label>
-                <textarea id="queueMessage" rows="3" placeholder="Optional message..."></textarea>
-
-                <label>Video URL</label>
-                <input type="text" id="queueVideoUrl" placeholder="https://youtube.com/...">
-
-                <label>Or Upload Video</label>
-                <input type="file" id="queueMediaFile">
-
-                <button onclick="addToQueue()" class="primary-btn">➕ Add to Queue</button>
-
-                <h3 style="margin-top: 30px;">Queue Items</h3>
-                <div id="queue-container">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- LIBRARY TAB -->
-        <div id="library-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>📚 Video Library</h2>
-                <p style="color: #888;">Save videos for quick reuse</p>
-
-                <label>Video Title *</label>
-                <input type="text" id="libTitle" placeholder="My awesome video">
-
-                <label>Category</label>
-                <input type="text" id="libCategory" placeholder="Memes, Tutorials, etc.">
-
-                <label>Video URL</label>
-                <input type="text" id="libVideoUrl" placeholder="https://youtube.com/...">
-
-                <label>Or Upload Video *</label>
-                <input type="file" id="libMediaFile">
-
-                <button onclick="saveToLibrary()" class="primary-btn">💾 Save to Library</button>
-
-                <h3 style="margin-top: 30px;">Your Library</h3>
-                <div id="library-container" class="library-grid">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- RECURRING TAB -->
-        <div id="recurring-tab" class="tab-content hidden">
-            <div class="tab-content-wrapper">
-                <div class="card">
-                    <h2>🔄 Recurring Posts</h2>
-                    <p style="color: #888; margin-bottom: 20px;">Choose a posting method:</p>
-                    
-                    <div style="display: flex; gap: 10px; margin-bottom: 30px;">
-                        <button onclick="showRecurringMethod('simple')" class="primary-btn" id="simple-btn">Simple</button>
-                        <button onclick="showRecurringMethod('advanced')" class="primary-btn" style="background: #4e5058;">Advanced</button>
-                    </div>
-                </div>
-                
-                <!-- SIMPLE RECURRING -->
-                <div id="simple-recurring" class="card">
-                    <h3>📅 Simple Recurring Post</h3>
-                    <p style="color: #888;">Auto-post same content every day/week/month</p>
-                    
-                    <label>Select Channel *</label>
-                    <select id="recurringChannelSelect" onchange="setGuildFromChannel('recurringChannelSelect')">
-                        <option value="">-- Loading Channels --</option>
-                    </select>
-                    
-                    <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                    <input type="text" id="recurringManualChannelId" placeholder="Paste channel ID here...">
-
-                    <label>Message *</label>
-                    <textarea id="recurringContent" rows="3" placeholder="Message to post..."></textarea>
-
-                    <label>Frequency *</label>
-                    <select id="recurringFrequency">
-                        <option value="">-- Select --</option>
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
-                    </select>
-
-                    <label>Video URL</label>
-                    <input type="text" id="recurringVideoUrl" placeholder="https://youtube.com/...">
-
-                    <label>Or Upload Video (up to 3 files)</label>
-                    <input type="file" id="recurringMediaFile" multiple accept="video/*,image/*">
-
-                    <button onclick="addRecurringPost()" class="primary-btn">✅ Create Recurring</button>
-
-                    <h3 style="margin-top: 30px;">Active Recurring Posts</h3>
-                    <div id="recurring-container">
-                        <p style="color: #888;">Loading...</p>
-                    </div>
-                </div>
-                
-                <!-- ADVANCED RECURRING -->
-                <div id="advanced-recurring" class="card hidden">
-                    <h3>📅 Advanced: Schedule by Day & Time</h3>
-                    <p style="color: #888; margin-bottom: 20px;">Pick different videos for each day and time slot</p>
-                    
-                    <label>Select Channel *</label>
-                    <select id="advancedChannelSelect">
-                        <option value="">-- Loading Channels --</option>
-                    </select>
-                    
-                    <div id="advanced-recurring-container">
-                        <p style="color: #888;">Loading...</p>
-                    </div>
-                    
-                    <button onclick="saveAdvancedRecurring()" class="primary-btn" style="margin-top: 20px;">💾 Save Advanced Schedule</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- TEMPLATES TAB -->
-        <div id="templates-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>🎨 Message Templates</h2>
-                <p style="color: #888;">Create reusable message templates</p>
-
-                <label>Template Name *</label>
-                <input type="text" id="tempName" placeholder="e.g., Daily Meme">
-
-                <label>Message Before Video</label>
-                <textarea id="tempBefore" rows="3" placeholder="🤣 Meme of the day:"></textarea>
-
-                <label>Message After Video</label>
-                <textarea id="tempAfter" rows="3" placeholder="Drop your thoughts!"></textarea>
-
-                <button onclick="saveTemplate()" class="primary-btn">💾 Save Template</button>
-
-                <h3 style="margin-top: 30px;">Your Templates</h3>
-                <div id="templates-container">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- BRANDING TAB -->
-        <div id="branding-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>🎭 Watermark & Branding</h2>
-                <p style="color: #888;">Add logos/watermarks to videos (coming soon)</p>
-
-                <label>Logo/Watermark Image</label>
-                <input type="file" id="brandingImage" accept="image/*">
-
-                <label>Position</label>
-                <select id="brandingPosition">
-                    <option value="top-left">Top Left</option>
-                    <option value="top-right">Top Right</option>
-                    <option value="bottom-left">Bottom Left</option>
-                    <option value="bottom-right" selected>Bottom Right</option>
-                    <option value="center">Center</option>
-                </select>
-
-                <label>Opacity (%)</label>
-                <input type="number" id="brandingOpacity" min="0" max="100" value="100">
-
-                <label>Text Watermark</label>
-                <input type="text" id="brandingText" placeholder="© Your Brand">
-
-                <button onclick="setBranding()" class="primary-btn">💾 Save Branding</button>
-            </div>
-        </div>
-
-        <!-- SCHEDULED POSTS TAB -->
-        <div id="scheduled-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>✅ Scheduled Posts</h2>
-                <p style="color: #888;">View and manage upcoming posts</p>
-                <div id="scheduled-posts">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- ANALYTICS TAB -->
-        <div id="analytics-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>📊 Analytics Dashboard</h2>
-                <p style="color: #888;">Track your posting activity</p>
-                <div id="analytics-container">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-                <button onclick="exportAllData()" class="primary-btn" style="margin-top: 20px;">💾 Export Backup</button>
-            </div>
-        </div>
-
-        <!-- HISTORY TAB -->
-        <div id="history-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>📜 Post History</h2>
-                <p style="color: #888;">Recent posts (last 50)</p>
-                <div id="history-container">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- TEST MODE TAB -->
-        <div id="test-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>🧪 Test Mode</h2>
-                <p style="color: #888;">Quick test: Channel → Title → Send (no schedule)</p>
-                
-                <label>Select Channel *</label>
-                <select id="testChannelSelect" onchange="setGuildFromChannel('testChannelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
-                
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="testManualChannelId" placeholder="Paste channel ID here...">
-
-                <label>Message</label>
-                <input type="text" id="testVideoTitle" placeholder="Test message...">
-
-                <label>Media File</label>
-                <input type="file" id="testMediaFile" onchange="testPreviewMedia()">
-                <div id="testPreview"></div>
-
-                <button onclick="testSend()" class="primary-btn">🚀 Send Test</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="script.js"></script>
-    <script>
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.add('hidden');
-            });
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
+        for (const task of tasks) {
+            const taskTime = new Date(task.time).getTime();
             
-            document.getElementById(tabName + '-tab').classList.remove('hidden');
-            event.target.classList.add('active');
+            if (taskTime <= now) {
+                try {
+                    const channel = await client.channels.fetch(task.channelId);
+                    if (!channel) continue;
+
+                    const options = { content: task.content || '' };
+                    
+                    if (task.mediaBuffers && Array.isArray(task.mediaBuffers) && task.mediaBuffers.length > 0) {
+                        options.files = task.mediaBuffers.map(m => 
+                            new AttachmentBuilder(Buffer.from(m.buffer, 'base64'), { name: m.name })
+                        );
+                    } else if (task.videoUrl) {
+                        options.content += `\n${task.videoUrl}`;
+                    }
+
+                    await channel.send(options);
+                    console.log(`✓ Scheduled post sent to #${channel.name}`);
+                    saveHistory(task.channelId, task.content, task.videoUrl || null, task.mediaBuffers?.length > 0);
+                } catch (err) {
+                    console.error("Scheduled post failed:", err.message);
+                    remainingTasks.push(task);
+                }
+            } else {
+                remainingTasks.push(task);
+            }
         }
-    </script>
-</body>
-</html>
+        
+        fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(remainingTasks, null, 2));
+
+        // Process recurring posts
+        checkRecurringPosts();
+    } catch (err) {
+        console.error("Scheduler error:", err);
+    } finally {
+        schedulerActive = false;
+    }
+};
+
+const checkRecurringPosts = async () => {
+    try {
+        const recurring = JSON.parse(fs.readFileSync(RECURRING_FILE, 'utf-8') || '{}');
+        const now = new Date();
+
+        for (const id in recurring) {
+            const post = recurring[id];
+            const lastRun = post.lastRun ? new Date(post.lastRun) : null;
+            let shouldRun = false;
+
+            if (!lastRun) {
+                shouldRun = true;
+            } else {
+                if (post.frequency === 'daily' && now.getTime() - lastRun.getTime() >= 86400000) shouldRun = true;
+                if (post.frequency === 'weekly' && now.getTime() - lastRun.getTime() >= 604800000) shouldRun = true;
+                if (post.frequency === 'monthly' && now.getTime() - lastRun.getTime() >= 2592000000) shouldRun = true;
+            }
+
+            if (shouldRun) {
+                try {
+                    const channel = await client.channels.fetch(post.channelId);
+                    const options = { content: post.content || '' };
+                    if (post.mediaBuffer) {
+                        options.files = [new AttachmentBuilder(Buffer.from(post.mediaBuffer, 'base64'), { name: post.fileName })];
+                    } else if (post.videoUrl) {
+                        options.content += `\n${post.videoUrl}`;
+                    }
+                    await channel.send(options);
+                    post.lastRun = new Date().toISOString();
+                    fs.writeFileSync(RECURRING_FILE, JSON.stringify(recurring, null, 2));
+                    console.log(`✓ Recurring post sent: ${id}`);
+                } catch (err) {
+                    console.error("Recurring post error:", err);
+                }
+            }
+        }
+    } catch (err) {
+        console.error("Recurring posts check error:", err);
+    }
+};
+
+const processQueue = async () => {
+    try {
+        const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8') || '{}');
+        
+        for (const guildId in queue) {
+            const items = queue[guildId].filter(item => item.status === 'pending');
+            
+            if (items.length > 0) {
+                const nextItem = items[0];
+                try {
+                    const channel = await client.channels.fetch(nextItem.channelId);
+                    if (!channel) continue;
+
+                    const options = { content: nextItem.message || nextItem.title };
+                    
+                    if (nextItem.mediaBuffer) {
+                        options.files = [new AttachmentBuilder(Buffer.from(nextItem.mediaBuffer, 'base64'), { name: nextItem.fileName })];
+                    } else if (nextItem.videoUrl) {
+                        options.content += `\n${nextItem.videoUrl}`;
+                    }
+
+                    await channel.send(options);
+                    nextItem.status = 'completed';
+                    nextItem.sentAt = new Date().toISOString();
+                    fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
+                    saveHistory(nextItem.channelId, nextItem.title, nextItem.videoUrl, !!nextItem.mediaBuffer);
+                    console.log(`✓ Queue item processed`);
+                } catch (err) {
+                    console.error("Queue processing error:", err);
+                }
+            }
+        }
+    } catch (err) {
+        console.error("Queue error:", err);
+    }
+};
+
+setInterval(checkAndSendSchedules, 30000);
+setInterval(processQueue, 60000);
+
+// --- AUTH MIDDLEWARE ---
+const checkAuth = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || authHeader !== ADMIN_PASSWORD) {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    next();
+};
+
+// --- ROUTES ---
+app.get('/', (req, res) => res.sendFile(path.join(publicPath, 'index.html')));
+app.get('/health', (req, res) => res.status(200).json({ status: 'OK', bot: client.user ? 'Online' : 'Offline' }));
+
+// SUGGESTIONS ENDPOINTS
+app.post('/api/suggestions', async (req, res) => {
+    try {
+        const { idea, details, userName } = req.body;
+        
+        if (!idea) {
+            return res.status(400).json({ error: 'Idea required' });
+        }
+
+        const suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+        
+        suggestions.push({
+            id: Date.now(),
+            idea,
+            details: details || '',
+            userName: userName || 'Anonymous',
+            createdAt: new Date().toISOString(),
+            status: 'new'
+        });
+
+        fs.writeFileSync(SUGGESTIONS_FILE, JSON.stringify(suggestions, null, 2));
+        res.json({ success: true, message: 'Suggestion submitted! Thank you!' });
+    } catch (err) {
+        console.error("Suggestion error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/suggestions', checkAuth, (req, res) => {
+    try {
+        const suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+        res.json(suggestions);
+    } catch (err) {
+        res.json([]);
+    }
+});
+
+app.delete('/api/suggestions/:id', checkAuth, (req, res) => {
+    try {
+        let suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+        suggestions = suggestions.filter(s => s.id != req.params.id);
+        fs.writeFileSync(SUGGESTIONS_FILE, JSON.stringify(suggestions, null, 2));
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/channels', checkAuth, async (req, res) => {
+    try {
+        const channels = [];
+        
+        if (client.guilds && client.guilds.cache) {
+            client.guilds.cache.forEach(guild => {
+                if (guild.channels && guild.channels.cache) {
+                    guild.channels.cache.forEach(ch => {
+                        try {
+                            if (ch.type === 0) {
+                                channels.push({ 
+                                    id: ch.id, 
+                                    name: `${guild.name} - #${ch.name}`,
+                                    guildId: guild.id,
+                                    guildName: guild.name
+                                });
+                            }
+                        } catch (e) {}
+                    });
+                }
+            });
+        }
+        
+        console.log(`Channels: Found ${channels.length}`);
+        res.json(channels);
+    } catch (err) {
+        console.error("Channels error:", err);
+        res.json([]);
+    }
+});
+
+// POST ENDPOINTS
+app.post('/api/post', checkAuth, upload.single('mediaFile'), async (req, res) => {
+    try {
+        const { channelId, postTitle, scheduleTime, videoUrl } = req.body;
+
+        if (!channelId) return res.status(400).json({ error: 'Channel ID required' });
+
+        const channel = await client.channels.fetch(channelId).catch(() => null);
+        if (!channel) return res.status(400).json({ error: 'Channel not found' });
+
+        const content = postTitle || '';
+
+        if (scheduleTime && scheduleTime.trim() !== '') {
+            const scheduledDate = new Date(scheduleTime);
+            const now = new Date();
+            
+            // Allow 1 minute buffer for same-day scheduling
+            const minTime = new Date(now.getTime() + 60000);
+            
+            if (scheduledDate < minTime) {
+                return res.status(400).json({ error: 'Schedule time must be at least 1 minute in the future' });
+            }
+
+            const tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
+            
+            let mediaBuffer = null, mediaFileName = null;
+            if (req.file) {
+                mediaBuffer = req.file.buffer.toString('base64');
+                mediaFileName = req.file.originalname;
+            }
+
+            tasks.push({
+                channelId,
+                content,
+                time: scheduleTime,
+                mediaBuffer,
+                mediaFileName,
+                videoUrl: videoUrl || null,
+                createdAt: new Date().toISOString()
+            });
+
+            fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(tasks, null, 2));
+            return res.json({ success: true, scheduled: true, scheduledFor: scheduleTime });
+        }
+
+        const options = { content };
+        if (req.file) {
+            options.files = [new AttachmentBuilder(req.file.buffer, { name: req.file.originalname })];
+        } else if (videoUrl) {
+            options.content += `\n${videoUrl}`;
+        }
+
+        await channel.send(options);
+        saveHistory(channelId, content, videoUrl || null, !!req.file);
+        res.json({ success: true, scheduled: false });
+    } catch (err) {
+        console.error("Post error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// BATCH UPLOAD
+app.post('/api/batch/upload', checkAuth, upload.array('mediaFiles', 20), async (req, res) => {
+    try {
+        const { channelId, interval, startTime, titles } = req.body;
+        const titleArray = titles ? JSON.parse(titles) : [];
+
+        if (!channelId || !req.files || req.files.length === 0) {
+            return res.status(400).json({ error: 'Channel and files required' });
+        }
+
+        const intervalMs = parseInt(interval) * 3600000;
+        let currentTime = new Date(startTime);
+        const tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
+
+        req.files.forEach((file, idx) => {
+            const title = titleArray[idx] || `Video ${idx + 1}`;
+            tasks.push({
+                channelId,
+                content: title,
+                time: currentTime.toISOString(),
+                mediaBuffer: file.buffer.toString('base64'),
+                mediaFileName: file.originalname,
+                createdAt: new Date().toISOString()
+            });
+            currentTime = new Date(currentTime.getTime() + intervalMs);
+        });
+
+        fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(tasks, null, 2));
+        res.json({ success: true, scheduled: req.files.length, firstPost: tasks[tasks.length - req.files.length].time });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ANALYTICS ENDPOINTS
+app.get('/api/analytics', checkAuth, (req, res) => {
+    try {
+        const analytics = JSON.parse(fs.readFileSync(ANALYTICS_FILE, 'utf-8') || '{}');
+        res.json(analytics);
+    } catch (err) {
+        res.json({});
+    }
+});
+
+// WATERMARK/BRANDING
+app.post('/api/branding/set', checkAuth, upload.single('brandingImage'), async (req, res) => {
+    try {
+        const { position, opacity, textWatermark } = req.body;
+        const branding = {
+            image: req.file ? req.file.buffer.toString('base64') : null,
+            fileName: req.file ? req.file.originalname : null,
+            position: position || 'bottom-right',
+            opacity: opacity || 100,
+            textWatermark: textWatermark || '',
+            active: true
+        };
+        fs.writeFileSync(BRANDING_FILE, JSON.stringify(branding, null, 2));
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/branding', checkAuth, (req, res) => {
+    try {
+        const branding = JSON.parse(fs.readFileSync(BRANDING_FILE, 'utf-8') || '{}');
+        res.json(branding);
+    } catch (err) {
+        res.json({});
+    }
+});
+
+// RECURRING POSTS
+app.post('/api/recurring/add', checkAuth, upload.single('mediaFile'), async (req, res) => {
+    try {
+        const { channelId, content, frequency, videoUrl } = req.body;
+        const recurring = JSON.parse(fs.readFileSync(RECURRING_FILE, 'utf-8') || '{}');
+
+        const id = Date.now().toString();
+        let mediaBuffer = null, fileName = null;
+        if (req.file) {
+            mediaBuffer = req.file.buffer.toString('base64');
+            fileName = req.file.originalname;
+        }
+
+        recurring[id] = {
+            channelId,
+            content,
+            frequency,
+            videoUrl: videoUrl || null,
+            mediaBuffer,
+            fileName,
+            createdAt: new Date().toISOString(),
+            lastRun: null
+        };
+
+        fs.writeFileSync(RECURRING_FILE, JSON.stringify(recurring, null, 2));
+        res.json({ success: true, id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/recurring', checkAuth, (req, res) => {
+    try {
+        const recurring = JSON.parse(fs.readFileSync(RECURRING_FILE, 'utf-8') || '{}');
+        const list = Object.entries(recurring).map(([id, post]) => ({
+            id,
+            channelId: post.channelId,
+            content: post.content,
+            frequency: post.frequency,
+            lastRun: post.lastRun
+        }));
+        res.json(list);
+    } catch (err) {
+        res.json([]);
+    }
+});
+
+app.delete('/api/recurring/:id', checkAuth, (req, res) => {
+    try {
+        const recurring = JSON.parse(fs.readFileSync(RECURRING_FILE, 'utf-8') || '{}');
+        delete recurring[req.params.id];
+        fs.writeFileSync(RECURRING_FILE, JSON.stringify(recurring, null, 2));
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// EXPORT/BACKUP
+app.get('/api/export/all', checkAuth, (req, res) => {
+    try {
+        const backup = {
+            schedule: JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]'),
+            queue: JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8') || '{}'),
+            library: JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf-8') || '{}'),
+            templates: JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]'),
+            recurring: JSON.parse(fs.readFileSync(RECURRING_FILE, 'utf-8') || '{}'),
+            exportDate: new Date().toISOString()
+        };
+        res.json(backup);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// QUEUE ENDPOINTS
+app.post('/api/queue/add', checkAuth, upload.single('mediaFile'), async (req, res) => {
+    try {
+        const { channelId, title, guildId, message, videoUrl } = req.body;
+        const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8') || '{}');
+
+        if (!queue[guildId]) queue[guildId] = [];
+
+        let mediaBuffer = null, fileName = null;
+        if (req.file) {
+            mediaBuffer = req.file.buffer.toString('base64');
+            fileName = req.file.originalname;
+        }
+
+        queue[guildId].push({
+            id: Date.now(),
+            channelId,
+            title,
+            message: message || '',
+            mediaBuffer,
+            fileName,
+            videoUrl: videoUrl || null,
+            status: 'pending',
+            createdAt: new Date().toISOString()
+        });
+
+        fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
+        res.json({ success: true, queueLength: queue[guildId].length });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/queue/:guildId', checkAuth, (req, res) => {
+    try {
+        const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8') || '{}');
+        const items = queue[req.params.guildId] || [];
+        res.json(items);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/queue/:guildId/:id', checkAuth, (req, res) => {
+    try {
+        const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8') || '{}');
+        const items = queue[req.params.guildId] || [];
+        queue[req.params.guildId] = items.filter(i => i.id != req.params.id);
+        fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// LIBRARY ENDPOINTS
+app.post('/api/library/save', checkAuth, upload.single('mediaFile'), async (req, res) => {
+    try {
+        const { title, category, videoUrl } = req.body;
+        const library = JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf-8') || '{}');
+
+        if (!library.videos) library.videos = [];
+
+        let mediaBuffer = null, fileName = null;
+        if (req.file) {
+            mediaBuffer = req.file.buffer.toString('base64');
+            fileName = req.file.originalname;
+        }
+
+        library.videos.push({
+            id: Date.now(),
+            title,
+            category: category || 'Uncategorized',
+            mediaBuffer,
+            fileName,
+            videoUrl: videoUrl || null,
+            thumbnail: getYouTubeThumbnail(videoUrl),
+            savedAt: new Date().toISOString()
+        });
+
+        fs.writeFileSync(LIBRARY_FILE, JSON.stringify(library, null, 2));
+        res.json({ success: true, id: library.videos[library.videos.length - 1].id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/library', checkAuth, (req, res) => {
+    try {
+        const library = JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf-8') || '{}');
+        const videos = library.videos || [];
+        const sanitized = videos.map(v => ({
+            id: v.id,
+            title: v.title,
+            category: v.category,
+            hasMedia: !!v.mediaBuffer,
+            videoUrl: v.videoUrl,
+            thumbnail: v.thumbnail,
+            savedAt: v.savedAt
+        }));
+        res.json(sanitized);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/library/:id', checkAuth, (req, res) => {
+    try {
+        const library = JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf-8') || '{}');
+        library.videos = (library.videos || []).filter(v => v.id != req.params.id);
+        fs.writeFileSync(LIBRARY_FILE, JSON.stringify(library, null, 2));
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// TEMPLATES ENDPOINTS
+app.post('/api/templates', checkAuth, async (req, res) => {
+    try {
+        const { name, before, after, category } = req.body;
+        let templates = JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]');
+
+        templates.push({
+            id: Date.now(),
+            name,
+            before: before || '',
+            after: after || '',
+            category: category || 'General'
+        });
+
+        fs.writeFileSync(TEMPLATES_FILE, JSON.stringify(templates, null, 2));
+        res.json({ success: true, id: templates[templates.length - 1].id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/templates', checkAuth, (req, res) => {
+    try {
+        const templates = JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]');
+        res.json(templates);
+    } catch (err) {
+        res.json([]);
+    }
+});
+
+app.delete('/api/templates/:id', checkAuth, (req, res) => {
+    try {
+        let templates = JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8') || '[]');
+        templates = templates.filter(t => t.id != req.params.id);
+        fs.writeFileSync(TEMPLATES_FILE, JSON.stringify(templates, null, 2));
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// SCHEDULED ENDPOINTS
+app.get('/api/scheduled', checkAuth, (req, res) => {
+    try {
+        const data = fs.readFileSync(SCHEDULE_FILE, 'utf-8');
+        let tasks = JSON.parse(data || '[]');
+        
+        if (!Array.isArray(tasks)) {
+            tasks = [];
+        }
+
+        const sanitized = tasks.map((t, idx) => ({
+            index: idx,
+            time: t.time,
+            content: (t.content || '').substring(0, 100),
+            hasMedia: !!t.mediaBuffer,
+            videoUrl: t.videoUrl || null,
+            createdAt: t.createdAt
+        }));
+        
+        res.json(sanitized);
+    } catch (err) {
+        console.error('Scheduled read error:', err);
+        res.json([]);
+    }
+});
+
+app.delete('/api/scheduled/:index', checkAuth, (req, res) => {
+    try {
+        const index = parseInt(req.params.index);
+        const tasks = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8') || '[]');
+        if (index < 0 || index >= tasks.length) return res.status(400).json({ error: 'Invalid index' });
+        tasks.splice(index, 1);
+        fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(tasks, null, 2));
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// HISTORY ENDPOINTS
+app.get('/api/history', checkAuth, (req, res) => {
+    try {
+        const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8') || '{}');
+        const entries = (history.entries || []).slice(-50).reverse();
+        res.json(entries);
+    } catch (err) {
+        res.json([]);
+    }
+});
+
+// --- DISCORD BOT ---
+const client = new Client({ 
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.DirectMessages
+    ]
+});
+
+client.once('ready', () => {
+    console.log(`✓ Bot Online: ${client.user.tag}`);
+    console.log(`✓ Serving ${client.guilds.cache.size} guild(s)`);
+    
+    // Force update channels on startup
+    setTimeout(() => {
+        const channels = [];
+        client.guilds.cache.forEach(guild => {
+            if (guild.channels && guild.channels.cache) {
+                guild.channels.cache.forEach(ch => {
+                    if (ch.type === 0) {
+                        channels.push({ id: ch.id, name: ch.name });
+                    }
+                });
+            }
+        });
+        console.log(`✓ Available channels: ${channels.length}`);
+    }, 1000);
+});
+
+client.on('messageCreate', async (msg) => {
+    try {
+        if (msg.author.bot) return;
+        
+        // Handle !suggest command
+        if (msg.content.startsWith('!suggest')) {
+            const args = msg.content.slice(8).trim();
+            
+            if (!args) {
+                return msg.reply('Usage: `!suggest [idea], [other details]`\nExample: `!suggest Add dark mode, Make the dashboard darker`');
+            }
+
+            const parts = args.split(',');
+            const idea = parts[0].trim();
+            const details = parts[1]?.trim() || '';
+
+            try {
+                const suggestions = JSON.parse(fs.readFileSync(SUGGESTIONS_FILE, 'utf-8') || '[]');
+                
+                suggestions.push({
+                    id: Date.now(),
+                    idea,
+                    details,
+                    userName: msg.author.username,
+                    createdAt: new Date().toISOString(),
+                    status: 'new'
+                });
+
+                fs.writeFileSync(SUGGESTIONS_FILE, JSON.stringify(suggestions, null, 2));
+                msg.reply(`✓ Suggestion received! Thank you for the idea!\n> **${idea}**`);
+            } catch (err) {
+                msg.reply('Error saving suggestion');
+            }
+        }
+    } catch (err) {
+        console.error("Message handler error:", err);
+    }
+});
+
+client.on('error', err => console.error('Discord error:', err));
+process.on('unhandledRejection', err => console.error('Unhandled rejection:', err));
+
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server listening on port ${PORT}`);
+    console.log(`Health check: GET /health`);
+});
+
+client.login(DISCORD_TOKEN);
