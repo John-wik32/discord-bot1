@@ -11,28 +11,44 @@ async function fetchChannels() {
         return;
     }
 
+    const loginBtn = document.querySelector('#login-container button');
+    const originalText = loginBtn.innerText;
+    loginBtn.innerText = 'Connecting...';
+    loginBtn.disabled = true;
+
     try {
         console.log('Fetching channels...');
         const res = await fetch(`${API_BASE}/api/channels`, {
             headers: { 'Authorization': password }
         });
         
+        // FIX: Check if server returned HTML (error page) instead of JSON
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            const text = await res.text();
+            console.error("Server returned non-JSON:", text);
+            throw new Error("Server Error: The bot returned an invalid response. Check server logs.");
+        }
+
         if (!res.ok) {
             throw new Error(`HTTP ${res.status}: Invalid password or server error`);
         }
 
         let channels = await res.json();
-        console.log(`Got ${channels.length} channels`);
         
-        // Retry logic for empty channels
+        // Retry logic for empty channels (sometimes discord is slow to wake up)
         if (!channels || channels.length === 0) {
             console.log('No channels found, retrying in 2 seconds...');
             await new Promise(resolve => setTimeout(resolve, 2000));
             const retryRes = await fetch(`${API_BASE}/api/channels`, {
                 headers: { 'Authorization': password }
             });
-            channels = await retryRes.json();
+            if (retryRes.ok && retryRes.headers.get("content-type")?.includes("json")) {
+                channels = await retryRes.json();
+            }
         }
+
+        console.log(`Got ${channels.length} channels`);
 
         currentPassword = password;
         allChannels = channels;
@@ -42,7 +58,7 @@ async function fetchChannels() {
         document.getElementById('login-container').classList.add('hidden');
         document.getElementById('dashboard-container').classList.remove('hidden');
         
-        // Load initial data
+        // Load all data sections safely
         loadTemplates();
         loadLibrary();
         loadScheduled();
@@ -53,28 +69,37 @@ async function fetchChannels() {
         
     } catch (err) {
         console.error('Auth error:', err);
-        alert('Error: ' + err.message);
+        alert('Connection Failed: ' + err.message);
+        loginBtn.innerText = originalText;
+        loginBtn.disabled = false;
     }
 }
 
 function updateAllChannelSelects(channels) {
-    // Select all channel dropdowns
+    // Updates every channel dropdown on the page
     const selects = document.querySelectorAll('select[id$="ChannelSelect"], select[id="testChannelSelect"]');
     
     selects.forEach(select => {
-        // preserve current selection if possible, otherwise reset
         const currentVal = select.value;
         select.innerHTML = '<option value="">-- Select Channel --</option>' + 
             channels.map(c => `<option value="${c.id}" data-guild="${c.guildId}">${c.name}</option>`).join('');
-        if (currentVal) select.value = currentVal;
+        
+        // Try to keep previous selection
+        if (currentVal) {
+             const exists = Array.from(select.options).some(o => o.value === currentVal);
+             if (exists) select.value = currentVal;
+        }
     });
 }
 
 function setGuildFromChannel(selectId = 'channelSelect') {
     const select = document.getElementById(selectId);
-    if (!select) return;
+    if (!select || select.selectedIndex === -1) return;
+    
     const option = select.options[select.selectedIndex];
     selectedGuildId = option.dataset.guild || '';
+    
+    // If we are on the queue tab, reload the queue for this specific guild
     if (selectId.includes('queue')) {
         loadQueue();
     }
@@ -106,9 +131,10 @@ async function sendPost() {
             headers: { 'Authorization': currentPassword },
             body: formData
         });
+        
         const result = await res.json();
         if (res.ok) {
-            alert(`✓ Post Sent! (${result.files || 0} files)`);
+            alert(`✓ Post Sent!`);
             clearForm();
         } else {
             alert('Error: ' + result.error);
@@ -128,7 +154,6 @@ async function schedulePost() {
     if (!channelId) return alert('Select a channel or enter channel ID');
     if (!scheduleTime) return alert('Set schedule time');
     if (!postTitle && fileInputs.length === 0 && !videoUrl) return alert('Add message, media, or URL');
-    if (fileInputs.length > 3) return alert('Maximum 3 files allowed');
 
     // Check if time is valid (at least 1 minute in future)
     const scheduledDate = new Date(scheduleTime);
@@ -136,7 +161,7 @@ async function schedulePost() {
     const minTime = new Date(now.getTime() + 60000); // 1 minute from now
 
     if (scheduledDate < minTime) {
-        return alert(`Schedule time must be at least 1 minute in the future. Current time: ${now.toLocaleString()}`);
+        return alert(`Schedule time must be at least 1 minute in the future.`);
     }
 
     const formData = new FormData();
@@ -157,7 +182,7 @@ async function schedulePost() {
         });
         const result = await res.json();
         if (res.ok) {
-            alert(`✓ Post Scheduled for ${new Date(scheduleTime).toLocaleString()}! (${result.files || 0} files)`);
+            alert(`✓ Post Scheduled for ${new Date(scheduleTime).toLocaleString()}!`);
             document.getElementById('schedulePostContent').value = '';
             document.getElementById('scheduleTime').value = '';
             document.getElementById('scheduleVideoUrl').value = '';
@@ -178,7 +203,7 @@ async function testSend() {
     const title = document.getElementById('testVideoTitle').value;
     const fileInput = document.getElementById('testMediaFile');
 
-    if (!channelId) return alert('Select a channel or enter channel ID');
+    if (!channelId) return alert('Select a channel');
     if (!title && !fileInput.files[0]) return alert('Add title or media');
 
     const formData = new FormData();
@@ -241,7 +266,7 @@ async function addToQueue() {
         });
         const result = await res.json();
         if (res.ok) {
-            alert(`✓ Added to queue (${result.queueLength} items)`);
+            alert(`✓ Added to queue`);
             document.getElementById('queueTitle').value = '';
             document.getElementById('queueMessage').value = '';
             document.getElementById('queueVideoUrl').value = '';
@@ -261,10 +286,15 @@ async function loadQueue() {
         const res = await fetch(`${API_BASE}/api/queue/${guildId}`, {
             headers: { 'Authorization': currentPassword }
         });
-        const items = await res.json();
+        if (!res.ok) return;
+
+        let items = await res.json();
+        // Safety check
+        if (!Array.isArray(items)) items = [];
+
         const container = document.getElementById('queue-container');
         
-        if (!items || items.length === 0) {
+        if (items.length === 0) {
             container.innerHTML = '<p style="color: #888;">Queue empty</p>';
             return;
         }
@@ -338,10 +368,14 @@ async function loadLibrary() {
         const res = await fetch(`${API_BASE}/api/library`, {
             headers: { 'Authorization': currentPassword }
         });
-        const videos = await res.json();
+        if (!res.ok) return;
+
+        let videos = await res.json();
+        if (!Array.isArray(videos)) videos = [];
+
         const container = document.getElementById('library-container');
         
-        if (!videos || videos.length === 0) {
+        if (videos.length === 0) {
             container.innerHTML = '<p style="color: #888;">Library empty</p>';
             return;
         }
@@ -396,7 +430,6 @@ async function submitSuggestion() {
             alert('✓ Thank you for your suggestion!');
             document.getElementById('suggestionIdea').value = '';
             document.getElementById('suggestionDetails').value = '';
-            document.getElementById('suggestionName').value = '';
             loadSuggestions();
         } else {
             alert('Error: ' + result.error);
@@ -411,17 +444,19 @@ async function loadSuggestions() {
         const res = await fetch(`${API_BASE}/api/suggestions`, {
             headers: { 'Authorization': currentPassword }
         });
+        if (!res.ok) return;
+
         let suggestions = await res.json();
         const container = document.getElementById('suggestions-container');
         
-        // FIX: Ensure it is an array
+        // FIX: Critical fix for "map is not a function"
         if (!Array.isArray(suggestions)) {
-            console.warn('Suggestions API returned non-array:', suggestions);
+            console.warn('Suggestions API returned non-array, treating as empty.');
             suggestions = [];
         }
 
         if (suggestions.length === 0) {
-            container.innerHTML = '<p style="color: #888;">No suggestions yet. Be the first!</p>';
+            container.innerHTML = '<p style="color: #888;">No suggestions yet.</p>';
             return;
         }
 
@@ -437,7 +472,6 @@ async function loadSuggestions() {
         `).join('');
     } catch (err) {
         console.error('Suggestions load error:', err);
-        document.getElementById('suggestions-container').innerHTML = '<p style="color: #DA373C;">Error loading suggestions</p>';
     }
 }
 
@@ -483,10 +517,15 @@ async function loadTemplates() {
         const res = await fetch(`${API_BASE}/api/templates`, {
             headers: { 'Authorization': currentPassword }
         });
-        const templates = await res.json();
+        if (!res.ok) return;
+
+        let templates = await res.json();
+        // Safety check
+        if (!Array.isArray(templates)) templates = [];
+
         const container = document.getElementById('templates-container');
         
-        if (!templates || templates.length === 0) {
+        if (templates.length === 0) {
             container.innerHTML = '<p style="color: #888;">No templates</p>';
             return;
         }
@@ -534,16 +573,15 @@ async function loadScheduled() {
         const res = await fetch(`${API_BASE}/api/scheduled`, {
             headers: { 'Authorization': currentPassword }
         });
-        
-        if (!res.ok) {
-            document.getElementById('scheduled-posts').innerHTML = '<p style="color: #888;">Error loading</p>';
-            return;
-        }
+        if (!res.ok) return;
 
-        const tasks = await res.json();
+        let tasks = await res.json();
+        // Safety check
+        if (!Array.isArray(tasks)) tasks = [];
+
         const container = document.getElementById('scheduled-posts');
         
-        if (!Array.isArray(tasks) || tasks.length === 0) {
+        if (tasks.length === 0) {
             container.innerHTML = '<p style="color: #888;">No scheduled posts</p>';
             return;
         }
@@ -581,10 +619,15 @@ async function loadHistory() {
         const res = await fetch(`${API_BASE}/api/history`, {
             headers: { 'Authorization': currentPassword }
         });
-        const entries = await res.json();
+        if (!res.ok) return;
+
+        let entries = await res.json();
+        // Safety check
+        if (!Array.isArray(entries)) entries = [];
+
         const container = document.getElementById('history-container');
         
-        if (!entries || entries.length === 0) {
+        if (entries.length === 0) {
             container.innerHTML = '<p style="color: #888;">No history</p>';
             return;
         }
@@ -592,7 +635,7 @@ async function loadHistory() {
         container.innerHTML = entries.map(e => `
             <div class="history-item">
                 <small>${new Date(e.sentAt).toLocaleString()}</small>
-                <p>${e.videoTitle}</p>
+                <p>${e.videoTitle || 'No content'}</p>
             </div>
         `).join('');
     } catch (err) {
@@ -606,6 +649,8 @@ async function loadAnalytics() {
         const res = await fetch(`${API_BASE}/api/analytics`, {
             headers: { 'Authorization': currentPassword }
         });
+        if (!res.ok) return;
+
         const analytics = await res.json();
         
         if (!analytics || !analytics.totalPosts) {
@@ -725,10 +770,15 @@ async function loadRecurringPosts() {
         const res = await fetch(`${API_BASE}/api/recurring`, {
             headers: { 'Authorization': currentPassword }
         });
-        const posts = await res.json();
+        if (!res.ok) return;
+
+        let posts = await res.json();
+        // Safety check
+        if (!Array.isArray(posts)) posts = [];
+
         const container = document.getElementById('recurring-container');
         
-        if (!posts || posts.length === 0) {
+        if (posts.length === 0) {
             container.innerHTML = '<p style="color: #888;">No recurring posts</p>';
             return;
         }
@@ -759,34 +809,28 @@ async function deleteRecurring(id) {
     }
 }
 
-// ===== ADVANCED RECURRING SCHEDULE =====
+// ===== ADVANCED RECURRING SCHEDULE (UI ONLY FOR NOW) =====
 let recurringDayVideos = {};
 let currentRecurringDay = 'Monday';
 const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function initAdvancedRecurring() {
     const container = document.getElementById('advanced-recurring-container');
-    
     let html = '<div class="recurring-setup">';
     html += '<h3>📅 Schedule Videos by Day & Time</h3>';
     html += '<div class="days-selector" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin: 20px 0;">';
-    
     daysOfWeek.forEach(day => {
         html += `<button onclick="selectRecurringDay('${day}')" class="day-btn" id="day-${day}" style="padding: 10px; border: 2px solid #404249; border-radius: 5px; background: #1e1f22; color: white; cursor: pointer;">${day}</button>`;
     });
-    
     html += '</div>';
     html += '<div id="day-content-area"></div>';
     html += '</div>';
-    
     container.innerHTML = html;
     selectRecurringDay('Monday');
 }
 
 function selectRecurringDay(day) {
     currentRecurringDay = day;
-    
-    // Update button styles
     daysOfWeek.forEach(d => {
         const btn = document.getElementById(`day-${d}`);
         if (d === day) {
@@ -797,22 +841,15 @@ function selectRecurringDay(day) {
             btn.style.backgroundColor = '#1e1f22';
         }
     });
-    
-    // Load content for this day
     loadDayContent(day);
 }
 
 function loadDayContent(day) {
     const contentArea = document.getElementById('day-content-area');
-    
-    if (!recurringDayVideos[day]) {
-        recurringDayVideos[day] = [];
-    }
-    
+    if (!recurringDayVideos[day]) recurringDayVideos[day] = [];
     const videos = recurringDayVideos[day];
     
     let html = `<div class="card" style="margin-top: 20px;"><h3>Videos for ${day}</h3>`;
-    
     html += '<div class="time-slots">';
     videos.forEach((video, idx) => {
         html += `
@@ -820,130 +857,80 @@ function loadDayContent(day) {
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
                         <strong>${video.time || 'Not set'}</strong>
-                        <p style="margin: 5px 0; color: #888;">${video.title || 'Video'} ${video.videos?.length > 0 ? `(${video.videos.length} files)` : ''}</p>
+                        <p style="margin: 5px 0; color: #888;">${video.title || 'Video'}</p>
                     </div>
-                    <button onclick="editDayVideo('${day}', ${idx})" class="primary-btn" style="width: auto; padding: 8px 15px;">Edit</button>
-                    <button onclick="deleteDayVideo('${day}', ${idx})" class="delete-btn" style="width: auto; padding: 8px 15px; margin-left: 5px;">Delete</button>
+                    <button onclick="deleteDayVideo('${day}', ${idx})" class="delete-btn" style="width: auto; padding: 8px 15px;">Delete</button>
                 </div>
             </div>
         `;
     });
     html += '</div>';
-    
     html += `<button onclick="openAddVideoModal('${day}')" class="primary-btn" style="margin-top: 15px;">➕ Add Video Slot</button>`;
     html += '</div>';
-    
     contentArea.innerHTML = html;
 }
 
 function openAddVideoModal(day) {
     const modal = document.createElement('div');
     modal.id = 'video-modal';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.8);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-    `;
+    modal.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000;`;
     
     modal.innerHTML = `
         <div class="card" style="max-width: 500px; width: 90%;">
             <h2>Add Video for ${day}</h2>
-            
             <label>Time (24-hour format)</label>
             <input type="time" id="videoTime" placeholder="14:30">
-            
             <label>Message</label>
             <textarea id="videoMessage" rows="3" placeholder="Optional message..."></textarea>
-            
-            <label>Video URL</label>
-            <input type="text" id="videoUrlInput" placeholder="https://youtube.com/...">
-            
-            <label>Or Upload Videos (up to 3)</label>
-            <input type="file" id="modalMediaFiles" multiple accept="video/*,image/*">
-            <small style="color: #888; display: block;">Selected: <span id="file-count">0</span> files</small>
-            
             <div style="display: flex; gap: 10px; margin-top: 20px;">
                 <button onclick="saveVideoSlot('${day}')" class="primary-btn">✓ Save</button>
                 <button onclick="document.getElementById('video-modal').remove()" class="delete-btn">✕ Cancel</button>
             </div>
         </div>
     `;
-    
     document.body.appendChild(modal);
-    
-    document.getElementById('modalMediaFiles').addEventListener('change', (e) => {
-        document.getElementById('file-count').innerText = e.target.files.length;
-    });
 }
 
 async function saveVideoSlot(day) {
     const time = document.getElementById('videoTime').value;
     const message = document.getElementById('videoMessage').value;
-    const videoUrl = document.getElementById('videoUrlInput').value;
-    const files = document.getElementById('modalMediaFiles').files;
     
     if (!time) return alert('Set time');
-    if (!videoUrl && files.length === 0) return alert('Add video URL or files');
     
-    if (!recurringDayVideos[day]) {
-        recurringDayVideos[day] = [];
-    }
+    if (!recurringDayVideos[day]) recurringDayVideos[day] = [];
     
     recurringDayVideos[day].push({
         time,
         title: message || `Video at ${time}`,
-        message,
-        videoUrl,
-        videos: Array.from(files).map(f => f.name)
+        message
     });
     
     document.getElementById('video-modal').remove();
     loadDayContent(day);
-    alert('✓ Video slot added');
 }
 
 function deleteDayVideo(day, idx) {
-    if (!confirm('Delete this video slot?')) return;
+    if (!confirm('Delete this slot?')) return;
     recurringDayVideos[day].splice(idx, 1);
     loadDayContent(day);
 }
 
-function editDayVideo(day, idx) {
-    alert('Edit feature: Video #' + (idx + 1) + ' for ' + day);
-}
-
 function saveAdvancedRecurring() {
-    if (Object.keys(recurringDayVideos).every(day => recurringDayVideos[day].length === 0)) {
-        return alert('Add at least one video');
-    }
-    
-    alert(`✓ Recurring schedule saved!\n\nVideos scheduled:\n${Object.entries(recurringDayVideos).map(([day, videos]) => `${day}: ${videos.length} slot(s)`).join('\n')}`);
-    console.log('Saved schedule:', recurringDayVideos);
+    alert('Advanced recurring is in UI demo mode. Simple recurring is fully functional.');
 }
 
 function showRecurringMethod(method) {
     const simple = document.getElementById('simple-recurring');
     const advanced = document.getElementById('advanced-recurring');
-    const simpleBtn = document.getElementById('simple-btn');
-    const advancedBtn = document.getElementById('advanced-recurring').querySelector('button[onclick*="Advanced"]') || document.querySelector('[onclick*="advanced"]').previousElementSibling;
     
     if (method === 'simple') {
         simple.classList.remove('hidden');
         advanced.classList.add('hidden');
         document.getElementById('simple-btn').style.background = 'var(--primary)';
-        document.querySelectorAll('[onclick*="advanced"]')[0].style.background = '#4e5058';
     } else {
         simple.classList.add('hidden');
         advanced.classList.remove('hidden');
         document.getElementById('simple-btn').style.background = '#4e5058';
-        document.querySelectorAll('[onclick*="advanced"]')[0].style.background = 'var(--primary)';
         initAdvancedRecurring();
     }
 }
