@@ -11,8 +11,8 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123test';
 
 // Debug: Log the admin password on startup
-console.log('🔐 Admin password configured:', ADMIN_PASSWORD ? 'YES (length: ' + ADMIN_PASSWORD.length + ')' : 'NOT SET');
-console.log('🤖 Discord token configured:', DISCORD_TOKEN ? 'YES' : 'NO');
+console.log('🔐 Admin password:', ADMIN_PASSWORD);
+console.log('🤖 Discord token:', DISCORD_TOKEN ? 'Set' : 'Missing');
 
 // File paths
 const DATA_DIR = path.join(__dirname, 'data');
@@ -46,80 +46,100 @@ const writeFile = (file, data) => {
 // Multer config - allow multiple files
 const upload = multer({ 
     storage: multer.memoryStorage(),
-    limits: { fileSize: 50 * 1024 * 1024 } // 50MB per file
+    limits: { fileSize: 100 * 1024 * 1024 } // 100MB per file
 });
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Auth middleware
+// Auth middleware - SIMPLIFIED
 const auth = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     
-    // Debug logging
-    console.log('🔑 Auth attempt - Received:', authHeader ? '***' : 'none');
-    
     if (!authHeader) {
-        console.log('❌ No authorization header');
-        return res.status(401).json({ error: 'No authorization header' });
+        console.log('❌ No auth header');
+        return res.status(401).json({ error: 'No password provided' });
     }
     
     if (authHeader !== ADMIN_PASSWORD) {
-        console.log('❌ Password mismatch');
-        console.log('   Expected:', ADMIN_PASSWORD);
-        console.log('   Received:', authHeader);
-        return res.status(403).json({ error: 'Invalid password' });
+        console.log('❌ Wrong password. Got:', authHeader, 'Expected:', ADMIN_PASSWORD);
+        return res.status(403).json({ error: 'Wrong password' });
     }
     
-    console.log('✅ Auth successful');
+    console.log('✅ Auth OK');
     next();
 };
 
 // Discord Client
 const client = new Client({ 
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] 
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
+    ] 
 });
 
 client.once('ready', () => {
     console.log(`✅ Bot Online: ${client.user.tag}`);
     console.log(`✅ Servers: ${client.guilds.cache.size}`);
+    client.guilds.cache.forEach(guild => {
+        console.log(`   - ${guild.name} (${guild.id})`);
+        const textChannels = guild.channels.cache.filter(ch => ch.type === 0);
+        console.log(`     Channels: ${textChannels.size} text channels`);
+    });
 });
 
 // Public health check (no auth required)
 app.get('/health', (req, res) => res.json({ 
     status: 'ok', 
     bot: client.user ? 'online' : 'offline',
-    authConfigured: !!ADMIN_PASSWORD,
-    time: new Date().toISOString()
+    time: new Date().toISOString(),
+    servers: client.guilds.cache.size
 }));
 
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Get channels
+// Get channels - SIMPLIFIED
 app.get('/api/channels', auth, (req, res) => {
     console.log('📡 Fetching channels...');
-    const channels = [];
-    client.guilds.cache.forEach(guild => {
-        guild.channels.cache.forEach(ch => {
-            if (ch.type === 0) { // Text channels only
-                channels.push({
-                    id: ch.id,
-                    name: `${guild.name} - #${ch.name}`,
-                    guildId: guild.id
-                });
-            }
+    
+    try {
+        const channels = [];
+        
+        client.guilds.cache.forEach(guild => {
+            guild.channels.cache.forEach(ch => {
+                // Type 0 = text channel, Type 5 = announcement channel
+                if (ch.type === 0 || ch.type === 5) {
+                    channels.push({
+                        id: ch.id,
+                        name: `${guild.name} - #${ch.name}`,
+                        guildId: guild.id,
+                        guildName: guild.name,
+                        channelName: ch.name
+                    });
+                }
+            });
         });
-    });
-    console.log(`📡 Found ${channels.length} channels`);
-    res.json(channels);
+        
+        console.log(`📡 Found ${channels.length} channels`);
+        res.json(channels);
+    } catch (err) {
+        console.error('Error fetching channels:', err);
+        res.status(500).json({ error: 'Failed to fetch channels' });
+    }
 });
 
 // Send post immediately
 app.post('/api/send', auth, upload.array('mediaFiles', 10), async (req, res) => {
     console.log('📤 Sending post...');
+    console.log('Body:', req.body);
+    console.log('Files:', req.files ? req.files.length : 0);
+    
     try {
         const { channelId, message, videoUrl } = req.body;
         
@@ -132,9 +152,13 @@ app.post('/api/send', auth, upload.array('mediaFiles', 10), async (req, res) => 
             return res.status(400).json({ error: 'Add message, video URL, or media files' });
         }
 
-        const channel = await client.channels.fetch(channelId).catch(() => null);
+        const channel = await client.channels.fetch(channelId).catch((err) => {
+            console.error('Channel fetch error:', err);
+            return null;
+        });
+        
         if (!channel) {
-            return res.status(400).json({ error: 'Channel not found' });
+            return res.status(400).json({ error: 'Channel not found. Make sure bot has access.' });
         }
 
         // Prepare message content
@@ -180,9 +204,12 @@ app.post('/api/send', auth, upload.array('mediaFiles', 10), async (req, res) => 
     }
 });
 
-// Schedule post
+// Schedule post - FIXED TIME VALIDATION
 app.post('/api/schedule', auth, upload.array('mediaFiles', 10), async (req, res) => {
     console.log('⏰ Scheduling post...');
+    console.log('Body:', req.body);
+    console.log('Files:', req.files ? req.files.length : 0);
+    
     try {
         const { channelId, message, videoUrl, scheduleTime } = req.body;
         
@@ -194,11 +221,23 @@ app.post('/api/schedule', auth, upload.array('mediaFiles', 10), async (req, res)
             return res.status(400).json({ error: 'Schedule time is required' });
         }
 
-        // Validate schedule time is in the future
+        // Validate schedule time
         const scheduledDate = new Date(scheduleTime);
         const now = new Date();
-        if (scheduledDate <= now) {
-            return res.status(400).json({ error: 'Schedule time must be in the future' });
+        
+        console.log('Schedule time:', scheduleTime);
+        console.log('Parsed date:', scheduledDate);
+        console.log('Now:', now);
+        console.log('Difference (ms):', scheduledDate - now);
+        
+        // Allow scheduling 1 minute in the future (60000 ms)
+        if (scheduledDate - now < 60000) {
+            return res.status(400).json({ 
+                error: 'Schedule time must be at least 1 minute in the future',
+                scheduledDate: scheduledDate.toISOString(),
+                now: now.toISOString(),
+                difference: scheduledDate - now
+            });
         }
 
         // Validate at least one content type
@@ -217,7 +256,8 @@ app.post('/api/schedule', auth, upload.array('mediaFiles', 10), async (req, res)
             files: req.files ? req.files.map(f => ({
                 name: f.originalname,
                 buffer: f.buffer.toString('base64'),
-                type: f.mimetype
+                type: f.mimetype,
+                size: f.size
             })) : [],
             createdAt: new Date().toISOString(),
             status: 'scheduled'
@@ -263,6 +303,58 @@ app.get('/api/history', auth, (req, res) => {
     res.json(history);
 });
 
+// Test endpoint WITH FILE UPLOAD
+app.post('/api/test', auth, upload.array('mediaFiles', 10), async (req, res) => {
+    console.log('🧪 Test request with files...');
+    console.log('Body:', req.body);
+    console.log('Files:', req.files ? req.files.length : 0);
+    
+    try {
+        const { channelId, message } = req.body;
+        
+        if (!channelId) {
+            return res.status(400).json({ error: 'Channel ID is required' });
+        }
+
+        const channel = await client.channels.fetch(channelId).catch((err) => {
+            console.error('Channel fetch error:', err);
+            return null;
+        });
+        
+        if (!channel) {
+            return res.status(400).json({ error: 'Channel not found' });
+        }
+
+        // Prepare test message
+        let content = `✅ Test message from bot!\n${message || 'Bot is working correctly!'}\n\n`;
+        content += `Time: ${new Date().toLocaleString()}\n`;
+        content += `Channel: ${channel.name}`;
+
+        // Prepare attachments if any
+        const options = { content };
+        if (req.files && req.files.length > 0) {
+            options.files = req.files.map(f => 
+                new AttachmentBuilder(f.buffer, { name: f.originalname })
+            );
+            content += `\nFiles: ${req.files.length} attached`;
+        }
+
+        // Send test message
+        await channel.send(options);
+
+        console.log('✅ Test message sent with files');
+
+        res.json({ 
+            success: true, 
+            message: 'Test message sent successfully!',
+            filesCount: req.files ? req.files.length : 0
+        });
+    } catch (err) {
+        console.error('❌ Test error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Scheduler runner - checks every 30 seconds
 async function runScheduler() {
     const schedule = readFile(SCHEDULE_FILE);
@@ -303,7 +395,7 @@ async function runScheduler() {
 
                 // Send to Discord
                 await channel.send(options);
-                console.log(`✅ Posted scheduled message: ${task.message || '(no message)'}`);
+                console.log(`✅ Posted scheduled message: ${task.id}`);
 
                 // Save to history
                 const history = readFile(HISTORY_FILE);
@@ -339,55 +431,14 @@ async function runScheduler() {
 // Run scheduler every 30 seconds
 setInterval(runScheduler, 30000);
 
-// Test endpoint
-app.post('/api/test', auth, async (req, res) => {
-    console.log('🧪 Test request...');
-    try {
-        const { channelId, message } = req.body;
-        
-        if (!channelId) {
-            return res.status(400).json({ error: 'Channel ID is required' });
-        }
-
-        const channel = await client.channels.fetch(channelId).catch(() => null);
-        if (!channel) {
-            return res.status(400).json({ error: 'Channel not found' });
-        }
-
-        // Send test message
-        await channel.send({
-            content: `✅ Test message from bot!\n${message || 'Bot is working correctly!'}`
-        });
-
-        console.log('✅ Test message sent');
-
-        res.json({ 
-            success: true, 
-            message: 'Test message sent successfully!' 
-        });
-    } catch (err) {
-        console.error('❌ Test error:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Debug endpoint to check auth
-app.get('/api/debug-auth', (req, res) => {
-    const authHeader = req.headers['authorization'];
-    const matches = authHeader === ADMIN_PASSWORD;
-    
-    console.log('🔍 Debug auth check:');
-    console.log('   Received:', authHeader ? '***' : 'none');
-    console.log('   Expected:', ADMIN_PASSWORD ? '***' : 'none');
-    console.log('   Matches:', matches);
-    
+// Debug endpoint
+app.get('/api/debug', (req, res) => {
     res.json({
-        receivedAuth: authHeader ? '***' : 'none',
-        expectedAuth: ADMIN_PASSWORD ? '***' : 'none',
-        matches: matches,
-        authHeaderLength: authHeader ? authHeader.length : 0,
-        expectedLength: ADMIN_PASSWORD ? ADMIN_PASSWORD.length : 0,
-        serverTime: new Date().toISOString()
+        adminPassword: ADMIN_PASSWORD ? 'Set' : 'Not set',
+        discordToken: DISCORD_TOKEN ? 'Set' : 'Not set',
+        botReady: client.user ? 'Yes' : 'No',
+        guilds: client.guilds.cache.size,
+        time: new Date().toISOString()
     });
 });
 
@@ -398,17 +449,8 @@ app.listen(PORT, () => {
     console.log('========================================');
 });
 
-// Login to Discord with retry
-async function loginToDiscord() {
-    try {
-        console.log('🔗 Logging into Discord...');
-        await client.login(DISCORD_TOKEN);
-    } catch (err) {
-        console.error('❌ Failed to login to Discord:', err.message);
-        console.log('🔄 Retrying in 10 seconds...');
-        setTimeout(loginToDiscord, 10000);
-    }
-}
-
-// Start Discord login
-loginToDiscord();
+// Login to Discord
+client.login(DISCORD_TOKEN).catch(err => {
+    console.error('❌ Failed to login to Discord:', err.message);
+    console.log('Make sure DISCORD_TOKEN is set correctly in environment variables');
+});
