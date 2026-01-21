@@ -1,70 +1,46 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
 <title>Discord Bot Manager</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- LOGIN -->
-<div id="login" class="card">
-  <h1>🤖 Discord Bot Manager</h1>
-  <input type="password" id="password" placeholder="Admin Password">
+<div id="login">
+  <input type="password" id="pw" placeholder="Admin password">
   <button onclick="login()">Login</button>
 </div>
 
-<!-- APP -->
 <div id="app" class="hidden">
+  <button onclick="tab('send')">Send</button>
+  <button onclick="tab('schedule')">Schedule</button>
+  <button onclick="tab('test')">Test</button>
+  <button onclick="tab('scheduled')">Scheduled</button>
+  <button onclick="tab('history')">History</button>
 
-  <div class="tabs">
-    <button onclick="showTab('send')" class="active">Send</button>
-    <button onclick="showTab('schedule')">Schedule</button>
-    <button onclick="showTab('test')">Test</button>
-    <button onclick="showTab('scheduled')">Scheduled</button>
-    <button onclick="showTab('history')">History</button>
-  </div>
-
-  <!-- SEND -->
-  <div id="send" class="tab">
-    <h2>📤 Send Now</h2>
+  <div id="send">
     <select id="sendChannel"></select>
-    <textarea id="sendText" placeholder="Message"></textarea>
+    <textarea id="sendText"></textarea>
     <input type="file" id="sendFiles" multiple>
-    <button onclick="sendNow()">Send</button>
+    <button onclick="send()">Send</button>
   </div>
 
-  <!-- SCHEDULE -->
-  <div id="schedule" class="tab hidden">
-    <h2>⏰ Schedule Post</h2>
+  <div id="schedule" class="hidden">
     <select id="scheduleChannel"></select>
-    <textarea id="scheduleText" placeholder="Message"></textarea>
+    <textarea id="scheduleText"></textarea>
     <input type="file" id="scheduleFiles" multiple>
     <input type="datetime-local" id="scheduleTime">
-    <button onclick="schedulePost()">Schedule</button>
+    <button onclick="schedule()">Schedule</button>
   </div>
 
-  <!-- TEST -->
-  <div id="test" class="tab hidden">
-    <h2>🧪 Test Mode</h2>
+  <div id="test" class="hidden">
     <select id="testChannel"></select>
-    <input type="text" id="testText" placeholder="Test message">
     <input type="file" id="testFiles" multiple>
-    <button onclick="testSend()">Send Test</button>
+    <button onclick="test()">Test Send</button>
   </div>
 
-  <!-- SCHEDULED -->
-  <div id="scheduled" class="tab hidden">
-    <h2>📋 Scheduled Posts</h2>
-    <div id="scheduledList"></div>
-  </div>
-
-  <!-- HISTORY -->
-  <div id="history" class="tab hidden">
-    <h2>📜 History</h2>
-    <div id="historyList"></div>
-  </div>
-
+  <div id="scheduled" class="hidden"></div>
+  <div id="history" class="hidden"></div>
 </div>
 
 <script src="script.js"></script>
