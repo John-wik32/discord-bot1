@@ -1,16 +1,12 @@
-FROM node:22-slim
+FROM node:18
 
 WORKDIR /app
 
-# Copy package info and install
-COPY package.json ./
+COPY package*.json ./
 RUN npm install
 
-# Copy everything else (including your public folder)
 COPY . .
 
-# Expose the port used in index.js
 EXPOSE 8000
 
-# Start the application
-CMD ["node", "index.js"]
+CMD ["npm", "start"]
