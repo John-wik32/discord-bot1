@@ -1,38 +1,129 @@
+* {
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
 body {
-  background:#1e1f22;
-  color:#fff;
-  font-family:Arial;
-  padding:20px;
+  background: #1e1f22;
+  color: #ffffff;
+  margin: 0;
+  padding: 20px;
 }
 
-.card, .tab {
-  background:#2b2d31;
-  padding:20px;
-  border-radius:6px;
-  margin-bottom:20px;
+.hidden {
+  display: none !important;
 }
 
-.hidden { display:none }
-
-input, textarea, select, button {
-  width:100%;
-  margin:8px 0;
-  padding:10px;
-  background:#1e1f22;
-  color:white;
-  border:1px solid #444;
+/* CONTAINERS */
+#login,
+#app {
+  max-width: 700px;
+  margin: auto;
 }
 
-button {
-  background:#5865f2;
-  cursor:pointer;
+h1, h2 {
+  margin-bottom: 10px;
+}
+
+/* TABS */
+.tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
 }
 
 .tabs button {
-  width:auto;
-  margin-right:10px;
+  background: #2b2d31;
+  color: #ccc;
+  border: none;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-weight: bold;
 }
 
-.tabs .active {
-  background:#4752c4;
+.tabs button.active {
+  background: #5865f2;
+  color: white;
+}
+
+.tabs button:hover {
+  background: #4752c4;
+  color: white;
+}
+
+/* CARDS */
+.tab {
+  background: #2b2d31;
+  padding: 20px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+}
+
+/* INPUTS */
+input,
+textarea,
+select {
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+  margin-bottom: 14px;
+  background: #1e1f22;
+  color: white;
+  border: 1px solid #444;
+  border-radius: 4px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* BUTTONS */
+button {
+  width: 100%;
+  padding: 10px;
+  background: #5865f2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+button:hover {
+  background: #4752c4;
+}
+
+/* LIST ITEMS */
+.list-item {
+  background: #1e1f22;
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  border-left: 4px solid #5865f2;
+}
+
+.list-item small {
+  color: #aaa;
+  display: block;
+  margin-top: 4px;
+}
+
+/* FILE INPUT */
+input[type="file"] {
+  background: #1e1f22;
+  padding: 6px;
+}
+
+/* MOBILE */
+@media (max-width: 600px) {
+  body {
+    padding: 10px;
+  }
+
+  .tabs {
+    gap: 6px;
+  }
 }
