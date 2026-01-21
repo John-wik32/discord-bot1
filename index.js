@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
+const path = require("path");
 const { Client, GatewayIntentBits } = require("discord.js");
 
 const app = express();
@@ -10,84 +11,64 @@ const PORT = process.env.PORT || 8000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 
-/* -------------------- CORS (REQUIRED FOR KOYEB) -------------------- */
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-admin-password"]
-}));
-
+app.use(cors());
 app.use(express.json());
+app.use(express.static("public"));
 
-/* -------------------- HEALTH CHECK -------------------- */
+/* ---------- HEALTH ---------- */
 app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({ ok: true });
 });
 
-/* -------------------- AUTH -------------------- */
+/* ---------- AUTH (QUERY BASED – NO CORS ISSUES) ---------- */
 function auth(req, res, next) {
-  const pw = req.headers["x-admin-password"];
-
-  console.log("AUTH HEADER:", pw); // DEBUG LOG
-
-  if (!pw || pw !== ADMIN_PASSWORD) {
+  if (req.query.pw !== ADMIN_PASSWORD) {
     return res.status(403).json({ error: "Forbidden" });
   }
   next();
 }
 
-/* -------------------- DISCORD BOT -------------------- */
+/* ---------- DISCORD ---------- */
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-let cachedChannels = [];
+let channelsCache = [];
 
 client.once("ready", async () => {
-  console.log(`Discord logged in as ${client.user.tag}`);
+  console.log("Discord logged in");
 
-  cachedChannels = [];
-
+  channelsCache = [];
   const guilds = await client.guilds.fetch();
-  for (const [, guildRef] of guilds) {
-    const guild = await guildRef.fetch();
-    const channels = await guild.channels.fetch();
 
-    channels.forEach(ch => {
-      if (ch.isTextBased()) {
-        cachedChannels.push({
-          id: ch.id,
-          name: `${guild.name} / ${ch.name}`
+  for (const [, g] of guilds) {
+    const guild = await g.fetch();
+    const channels = await guild.channels.fetch();
+    channels.forEach(c => {
+      if (c.isTextBased()) {
+        channelsCache.push({
+          id: c.id,
+          name: `${guild.name} / ${c.name}`
         });
       }
     });
   }
 
-  console.log("Channels loaded:", cachedChannels.length);
+  console.log("Channels loaded:", channelsCache.length);
 });
 
-client.login(DISCORD_TOKEN)
-  .then(() => console.log("Discord login success"))
-  .catch(err => console.error("Discord login failed:", err.message));
+client.login(DISCORD_TOKEN).catch(console.error);
 
-/* -------------------- API ROUTES -------------------- */
+/* ---------- API ---------- */
 app.get("/api/channels", auth, (req, res) => {
-  res.json(cachedChannels);
+  res.json(channelsCache);
 });
 
-app.get("/api/history", auth, (req, res) => {
-  res.json([]);
-});
-
-app.get("/api/scheduled", auth, (req, res) => {
-  res.json([]);
-});
-
-app.post("/api/post", auth, upload.any(), async (req, res) => {
+app.post("/api/post", auth, upload.none(), (req, res) => {
   res.json({ ok: true });
 });
 
-/* -------------------- START SERVER -------------------- */
+/* ---------- START ---------- */
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log("Server running on port", PORT);
 });
