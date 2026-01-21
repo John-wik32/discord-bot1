@@ -11,9 +11,12 @@
     <div id="login-container" class="card-container">
         <div class="card login-card">
             <h1>🤖 Discord Media Bot</h1>
-            <p style="color: #888;">Enter admin password</p>
-            <input type="password" id="adminPassword" placeholder="Admin Password">
+            <p style="color: #888;">Enter admin password to continue</p>
+            <input type="password" id="adminPassword" placeholder="Enter password (default: 123test)" autofocus>
             <button onclick="login()">Connect to Bot</button>
+            <p style="margin-top: 15px; font-size: 0.9em; color: #666;">
+                Make sure the Discord bot is online and has access to your server.
+            </p>
         </div>
     </div>
 
@@ -26,11 +29,11 @@
 
         <!-- TAB NAVIGATION -->
         <div class="tab-buttons">
-            <button class="tab-btn active" onclick="switchTab('send')">📤 Send Now</button>
-            <button class="tab-btn" onclick="switchTab('schedule')">⏰ Schedule</button>
-            <button class="tab-btn" onclick="switchTab('scheduled')">✅ Scheduled</button>
-            <button class="tab-btn" onclick="switchTab('history')">📜 History</button>
-            <button class="tab-btn" onclick="switchTab('test')">🧪 Test</button>
+            <button class="tab-btn active">📤 Send Now</button>
+            <button class="tab-btn">⏰ Schedule</button>
+            <button class="tab-btn">✅ Scheduled</button>
+            <button class="tab-btn">📜 History</button>
+            <button class="tab-btn">🧪 Test</button>
         </div>
 
         <!-- SEND TAB -->
@@ -38,13 +41,15 @@
             <div class="card">
                 <h2>📤 Send Media Now</h2>
                 
-                <label>Select Channel *</label>
+                <label>Select Channel</label>
                 <select id="channelSelect">
-                    <option value="">-- Loading Channels --</option>
+                    <option value="">-- Loading channels... --</option>
                 </select>
                 
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID</label>
-                <input type="text" id="manualChannelId" placeholder="Paste channel ID here...">
+                <div id="manualChannelId" style="display: none; margin-top: 10px;">
+                    <label>Enter Channel ID</label>
+                    <input type="text" placeholder="Paste Discord channel ID here">
+                </div>
 
                 <label>Message (Optional)</label>
                 <textarea id="message" rows="3" placeholder="Enter your message..."></textarea>
@@ -52,11 +57,11 @@
                 <label>Video URL (Optional)</label>
                 <input type="text" id="videoUrl" placeholder="https://youtube.com/watch?v=...">
 
-                <label>Upload Media Files *</label>
-                <input type="file" id="mediaFiles" multiple accept="video/*,image/*">
-                <small style="color: #888;">Max 10 files, 50MB each. Videos and images supported.</small>
+                <label>Upload Media Files</label>
+                <input type="file" id="mediaFiles" multiple accept="video/*,image/*,audio/*">
+                <small class="hint">Max 10 files, 100MB each. Videos, images, audio supported.</small>
                 
-                <div id="preview-container" style="margin-top: 15px;"></div>
+                <div id="preview-container" class="preview-area"></div>
 
                 <button onclick="sendPost()" class="primary-btn">🚀 Send Now</button>
             </div>
@@ -67,13 +72,15 @@
             <div class="card">
                 <h2>⏰ Schedule Media Post</h2>
                 
-                <label>Select Channel *</label>
+                <label>Select Channel</label>
                 <select id="scheduleChannelSelect">
-                    <option value="">-- Loading Channels --</option>
+                    <option value="">-- Loading channels... --</option>
                 </select>
                 
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID</label>
-                <input type="text" id="scheduleManualChannelId" placeholder="Paste channel ID here...">
+                <div id="scheduleManualChannelId" style="display: none; margin-top: 10px;">
+                    <label>Enter Channel ID</label>
+                    <input type="text" placeholder="Paste Discord channel ID here">
+                </div>
 
                 <label>Message (Optional)</label>
                 <textarea id="scheduleMessage" rows="3" placeholder="Enter your message..."></textarea>
@@ -81,15 +88,15 @@
                 <label>Video URL (Optional)</label>
                 <input type="text" id="scheduleVideoUrl" placeholder="https://youtube.com/watch?v=...">
 
-                <label>Upload Media Files *</label>
-                <input type="file" id="scheduleMediaFiles" multiple accept="video/*,image/*">
-                <small style="color: #888;">Max 10 files, 50MB each.</small>
+                <label>Upload Media Files</label>
+                <input type="file" id="scheduleMediaFiles" multiple accept="video/*,image/*,audio/*">
+                <small class="hint">Max 10 files, 100MB each.</small>
                 
-                <div id="schedulePreview" style="margin-top: 15px;"></div>
+                <div id="schedulePreview" class="preview-area"></div>
 
-                <label>Schedule Time *</label>
+                <label>Schedule Time</label>
                 <input type="datetime-local" id="scheduleTime">
-                <small style="color: #888;">Must be in the future (can be just 1 minute from now)</small>
+                <small class="hint">Must be at least 1 minute in the future</small>
 
                 <button onclick="schedulePost()" class="primary-btn">📅 Schedule Post</button>
             </div>
@@ -99,9 +106,9 @@
         <div id="scheduled-tab" class="tab-content hidden">
             <div class="card">
                 <h2>✅ Scheduled Posts</h2>
-                <p style="color: #888;">Upcoming scheduled posts</p>
+                <p style="color: #888;">Upcoming posts (auto-send when time comes)</p>
                 <div id="scheduled-posts">
-                    <p style="color: #888;">Loading...</p>
+                    <p style="color: #888; padding: 20px; text-align: center;">Loading scheduled posts...</p>
                 </div>
             </div>
         </div>
@@ -110,29 +117,37 @@
         <div id="history-tab" class="tab-content hidden">
             <div class="card">
                 <h2>📜 Post History</h2>
-                <p style="color: #888;">Recent sent posts</p>
+                <p style="color: #888;">Recently sent posts (last 20)</p>
                 <div id="history-container">
-                    <p style="color: #888;">Loading...</p>
+                    <p style="color: #888; padding: 20px; text-align: center;">Loading history...</p>
                 </div>
             </div>
         </div>
 
-        <!-- TEST TAB -->
+        <!-- TEST TAB WITH FILE UPLOAD -->
         <div id="test-tab" class="tab-content hidden">
             <div class="card">
                 <h2>🧪 Test Mode</h2>
-                <p style="color: #888;">Send a test message to verify bot is working</p>
+                <p style="color: #888;">Test bot functionality with optional files</p>
                 
-                <label>Select Channel *</label>
+                <label>Select Channel</label>
                 <select id="testChannelSelect">
-                    <option value="">-- Loading Channels --</option>
+                    <option value="">-- Loading channels... --</option>
                 </select>
                 
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID</label>
-                <input type="text" id="testManualChannelId" placeholder="Paste channel ID here...">
+                <div id="testManualChannelId" style="display: none; margin-top: 10px;">
+                    <label>Enter Channel ID</label>
+                    <input type="text" placeholder="Paste Discord channel ID here">
+                </div>
 
                 <label>Test Message (Optional)</label>
                 <input type="text" id="testMessage" placeholder="Optional test message...">
+
+                <label>Test with Media Files (Optional)</label>
+                <input type="file" id="testMediaFiles" multiple accept="video/*,image/*,audio/*">
+                <small class="hint">Optional: Upload files to test media sending</small>
+                
+                <div id="testPreview" class="preview-area"></div>
 
                 <button onclick="testSend()" class="primary-btn">🚀 Send Test</button>
             </div>
