@@ -66,24 +66,24 @@
                 <h2>⏰ Schedule Post</h2>
                 
                 <label>Select Channel *</label>
-                <select id="channelSelect" onchange="setGuildFromChannel()">
+                <select id="scheduleChannelSelect" onchange="setGuildFromChannel()">
                     <option value="">-- Loading Channels --</option>
                 </select>
 
                 <label>Video URL (Optional)</label>
-                <input type="text" id="videoUrl" placeholder="https://youtube.com/watch?v=...">
+                <input type="text" id="scheduleVideoUrl" placeholder="https://youtube.com/watch?v=...">
 
                 <label>Message Content</label>
-                <textarea id="postContent" rows="4" placeholder="Enter your message..."></textarea>
+                <textarea id="schedulePostContent" rows="4" placeholder="Enter your message..."></textarea>
 
                 <label>Add Media (Optional)</label>
-                <input type="file" id="mediaFile" onchange="previewMedia()">
-                <div id="preview-container"></div>
+                <input type="file" id="scheduleMediaFile" onchange="schedulePreviewMedia()">
+                <div id="schedulePreview"></div>
 
                 <label>Schedule Time (Same day or later) *</label>
                 <input type="datetime-local" id="scheduleTime">
 
-                <button onclick="sendPost()" class="primary-btn">📅 Schedule Post</button>
+                <button onclick="schedulePost()" class="primary-btn">📅 Schedule Post</button>
             </div>
         </div>
 
