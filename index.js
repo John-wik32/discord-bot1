@@ -10,16 +10,7 @@ const app = express();
 // Update multer to handle multiple files
 const upload = multer({ 
     storage: multer.memoryStorage(),
-    limits: { fileSize: 25 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-        const allowed = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'jpg', 'jpeg', 'png', 'gif', 'webp'];
-        const ext = file.originalname.split('.').pop().toLowerCase();
-        if (allowed.includes(ext)) {
-            cb(null, true);
-        } else {
-            cb(new Error('File type not allowed'));
-        }
-    }
+    limits: { fileSize: 25 * 1024 * 1024 }
 });
 
 // --- CONFIG ---
@@ -136,7 +127,7 @@ const checkAndSendSchedules = async () => {
 
                     const options = { content: task.content || '' };
                     
-                    if (task.mediaBuffers && task.mediaBuffers.length > 0) {
+                    if (task.mediaBuffers && Array.isArray(task.mediaBuffers) && task.mediaBuffers.length > 0) {
                         options.files = task.mediaBuffers.map(m => 
                             new AttachmentBuilder(Buffer.from(m.buffer, 'base64'), { name: m.name })
                         );
@@ -265,34 +256,26 @@ app.get('/api/channels', checkAuth, async (req, res) => {
     try {
         const channels = [];
         
-        // Wait for client to be ready
-        if (!client.isReady?.()) {
-            console.log("Bot not ready yet, waiting...");
-            return res.json([]);
-        }
-        
-        if (client && client.guilds && client.guilds.cache && client.guilds.cache.size > 0) {
-            for (const [guildId, guild] of client.guilds.cache) {
-                try {
-                    for (const [channelId, ch] of guild.channels.cache) {
-                        if (ch.type === 0 && ch.permissionsFor(client.user).has('SendMessages')) {
-                            channels.push({ 
-                                id: ch.id, 
-                                name: `${guild.name} - #${ch.name}`,
-                                guildId: guild.id,
-                                guildName: guild.name
-                            });
-                        }
-                    }
-                } catch (err) {
-                    console.error("Guild fetch error:", err);
+        if (client.guilds && client.guilds.cache) {
+            client.guilds.cache.forEach(guild => {
+                if (guild.channels && guild.channels.cache) {
+                    guild.channels.cache.forEach(ch => {
+                        try {
+                            if (ch.type === 0) {
+                                channels.push({ 
+                                    id: ch.id, 
+                                    name: `${guild.name} - #${ch.name}`,
+                                    guildId: guild.id,
+                                    guildName: guild.name
+                                });
+                            }
+                        } catch (e) {}
+                    });
                 }
-            }
-        } else {
-            console.log("No guilds found in cache");
+            });
         }
         
-        console.log(`Found ${channels.length} available channels`);
+        console.log(`Channels: Found ${channels.length}`);
         res.json(channels);
     } catch (err) {
         console.error("Channels error:", err);
@@ -728,6 +711,21 @@ const client = new Client({
 client.once('ready', () => {
     console.log(`✓ Bot Online: ${client.user.tag}`);
     console.log(`✓ Serving ${client.guilds.cache.size} guild(s)`);
+    
+    // Force update channels on startup
+    setTimeout(() => {
+        const channels = [];
+        client.guilds.cache.forEach(guild => {
+            if (guild.channels && guild.channels.cache) {
+                guild.channels.cache.forEach(ch => {
+                    if (ch.type === 0) {
+                        channels.push({ id: ch.id, name: ch.name });
+                    }
+                });
+            }
+        });
+        console.log(`✓ Available channels: ${channels.length}`);
+    }, 1000);
 });
 
 client.on('error', err => console.error('Discord error:', err));
@@ -735,6 +733,7 @@ process.on('unhandledRejection', err => console.error('Unhandled rejection:', er
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server listening on port ${PORT}`);
+    console.log(`Health check: GET /health`);
 });
 
 client.login(DISCORD_TOKEN);
