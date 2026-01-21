@@ -1,25 +1,144 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Discord Poster</title>
-  <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord Media Bot</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- LOGIN SCREEN -->
+    <div id="login-container" class="card-container">
+        <div class="card login-card">
+            <h1>🤖 Discord Media Bot</h1>
+            <p style="color: #888;">Enter admin password</p>
+            <input type="password" id="adminPassword" placeholder="Admin Password">
+            <button onclick="login()">Connect to Bot</button>
+        </div>
+    </div>
 
-<div id="login">
-  <h1>Admin Login</h1>
-  <input id="pw" placeholder="Admin Password" type="password">
-  <button onclick="login()">Login</button>
-</div>
+    <!-- DASHBOARD -->
+    <div id="dashboard-container" class="hidden">
+        <div class="dashboard-header">
+            <h1>🤖 Discord Media Bot</h1>
+            <button class="logout-btn" onclick="location.reload()">Logout</button>
+        </div>
 
-<div id="app" class="hidden">
-  <h1>Send Message</h1>
+        <!-- TAB NAVIGATION -->
+        <div class="tab-buttons">
+            <button class="tab-btn active" onclick="switchTab('send')">📤 Send Now</button>
+            <button class="tab-btn" onclick="switchTab('schedule')">⏰ Schedule</button>
+            <button class="tab-btn" onclick="switchTab('scheduled')">✅ Scheduled</button>
+            <button class="tab-btn" onclick="switchTab('history')">📜 History</button>
+            <button class="tab-btn" onclick="switchTab('test')">🧪 Test</button>
+        </div>
 
-  <select id="channel"></select>
-  <textarea id="text" placeholder="Message"></textarea>
-  <button onclick="send()">Send</button>
-</div>
+        <!-- SEND TAB -->
+        <div id="send-tab" class="tab-content">
+            <div class="card">
+                <h2>📤 Send Media Now</h2>
+                
+                <label>Select Channel *</label>
+                <select id="channelSelect">
+                    <option value="">-- Loading Channels --</option>
+                </select>
+                
+                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID</label>
+                <input type="text" id="manualChannelId" placeholder="Paste channel ID here...">
 
-<script src="script.js"></script>
+                <label>Message (Optional)</label>
+                <textarea id="message" rows="3" placeholder="Enter your message..."></textarea>
+
+                <label>Video URL (Optional)</label>
+                <input type="text" id="videoUrl" placeholder="https://youtube.com/watch?v=...">
+
+                <label>Upload Media Files *</label>
+                <input type="file" id="mediaFiles" multiple accept="video/*,image/*">
+                <small style="color: #888;">Max 10 files, 50MB each. Videos and images supported.</small>
+                
+                <div id="preview-container" style="margin-top: 15px;"></div>
+
+                <button onclick="sendPost()" class="primary-btn">🚀 Send Now</button>
+            </div>
+        </div>
+
+        <!-- SCHEDULE TAB -->
+        <div id="schedule-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>⏰ Schedule Media Post</h2>
+                
+                <label>Select Channel *</label>
+                <select id="scheduleChannelSelect">
+                    <option value="">-- Loading Channels --</option>
+                </select>
+                
+                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID</label>
+                <input type="text" id="scheduleManualChannelId" placeholder="Paste channel ID here...">
+
+                <label>Message (Optional)</label>
+                <textarea id="scheduleMessage" rows="3" placeholder="Enter your message..."></textarea>
+
+                <label>Video URL (Optional)</label>
+                <input type="text" id="scheduleVideoUrl" placeholder="https://youtube.com/watch?v=...">
+
+                <label>Upload Media Files *</label>
+                <input type="file" id="scheduleMediaFiles" multiple accept="video/*,image/*">
+                <small style="color: #888;">Max 10 files, 50MB each.</small>
+                
+                <div id="schedulePreview" style="margin-top: 15px;"></div>
+
+                <label>Schedule Time *</label>
+                <input type="datetime-local" id="scheduleTime">
+                <small style="color: #888;">Must be in the future (can be just 1 minute from now)</small>
+
+                <button onclick="schedulePost()" class="primary-btn">📅 Schedule Post</button>
+            </div>
+        </div>
+
+        <!-- SCHEDULED POSTS TAB -->
+        <div id="scheduled-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>✅ Scheduled Posts</h2>
+                <p style="color: #888;">Upcoming scheduled posts</p>
+                <div id="scheduled-posts">
+                    <p style="color: #888;">Loading...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- HISTORY TAB -->
+        <div id="history-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>📜 Post History</h2>
+                <p style="color: #888;">Recent sent posts</p>
+                <div id="history-container">
+                    <p style="color: #888;">Loading...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- TEST TAB -->
+        <div id="test-tab" class="tab-content hidden">
+            <div class="card">
+                <h2>🧪 Test Mode</h2>
+                <p style="color: #888;">Send a test message to verify bot is working</p>
+                
+                <label>Select Channel *</label>
+                <select id="testChannelSelect">
+                    <option value="">-- Loading Channels --</option>
+                </select>
+                
+                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID</label>
+                <input type="text" id="testManualChannelId" placeholder="Paste channel ID here...">
+
+                <label>Test Message (Optional)</label>
+                <input type="text" id="testMessage" placeholder="Optional test message...">
+
+                <button onclick="testSend()" class="primary-btn">🚀 Send Test</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
 </body>
 </html>
