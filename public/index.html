@@ -1,416 +1,72 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discord Bot Manager Pro</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<title>Discord Bot Manager</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- LOGIN SCREEN -->
-    <div id="login-container" class="card-container">
-        <div class="card login-card">
-            <h1>🤖 Bot Command Center Pro</h1>
-            <p style="color: #888;">Enter your admin password</p>
-            <input type="password" id="adminPassword" placeholder="Admin Password">
-            <button onclick="login()">Connect to Bot</button>
-        </div>
-    </div>
 
-    <!-- DASHBOARD -->
-    <div id="dashboard-container" class="hidden">
-        <div class="dashboard-header">
-            <h1>🤖 Bot Command Center Pro</h1>
-            <button class="logout-btn" onclick="location.reload()">Logout</button>
-        </div>
-
-        <!-- TAB NAVIGATION -->
-        <div class="tab-buttons">
-            <button class="tab-btn active" onclick="switchTab('send')">📤 Send</button>
-            <button class="tab-btn" onclick="switchTab('schedule')">⏰ Schedule</button>
-            <button class="tab-btn" onclick="switchTab('batch')">📦 Batch</button>
-            <button class="tab-btn" onclick="switchTab('queue')">📋 Queue</button>
-            <button class="tab-btn" onclick="switchTab('library')">📚 Library</button>
-            <button class="tab-btn" onclick="switchTab('recurring')">🔄 Recurring</button>
-            <button class="tab-btn" onclick="switchTab('templates')">🎨 Templates</button>
-            <button class="tab-btn" onclick="switchTab('branding')">🎭 Branding</button>
-            <button class="tab-btn" onclick="switchTab('scheduled')">✅ Scheduled</button>
-            <button class="tab-btn" onclick="switchTab('analytics')">📊 Analytics</button>
-            <button class="tab-btn" onclick="switchTab('history')">📜 History</button>
-            <button class="tab-btn" onclick="switchTab('test')">🧪 Test</button>
-            <button class="tab-btn" onclick="switchTab('suggest')">💡 Suggestions</button>
-        </div>
-
-        <!-- SEND TAB -->
-        <div id="send-tab" class="tab-content">
-            <div class="card">
-                <h2>📤 Send Post Now</h2>
-                
-                <label>Select Channel *</label>
-                <select id="channelSelect" onchange="setGuildFromChannel('channelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
-                
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="manualChannelId" placeholder="Paste channel ID here...">
-
-                <label>Video URL (YouTube, Twitch, etc.)</label>
-                <input type="text" id="videoUrl" placeholder="https://youtube.com/watch?v=...">
-
-                <label>Message Content</label>
-                <textarea id="postContent" rows="4" placeholder="Enter your message..."></textarea>
-
-                <label>Add Media (Optional - Up to 3 files)</label>
-                <input type="file" id="mediaFile" onchange="previewMedia()" multiple accept="video/*,image/*">
-                <small style="color: #888;">Max 3 files, 25MB each</small>
-                <div id="preview-container"></div>
-
-                <button onclick="sendPost()" class="primary-btn">🚀 Send Now</button>
-            </div>
-        </div>
-
-        <!-- SCHEDULE TAB -->
-        <div id="schedule-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>⏰ Schedule Post</h2>
-                
-                <label>Select Channel *</label>
-                <select id="scheduleChannelSelect" onchange="setGuildFromChannel('scheduleChannelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
-                
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="scheduleManualChannelId" placeholder="Paste channel ID here...">
-
-                <label>Video URL (Optional)</label>
-                <input type="text" id="scheduleVideoUrl" placeholder="https://youtube.com/watch?v=...">
-
-                <label>Message Content</label>
-                <textarea id="schedulePostContent" rows="4" placeholder="Enter your message..."></textarea>
-
-                <label>Add Media (Optional - Up to 3 files)</label>
-                <input type="file" id="scheduleMediaFile" onchange="schedulePreviewMedia()" multiple accept="video/*,image/*">
-                <small style="color: #888;">Max 3 files, 25MB each</small>
-                <div id="schedulePreview"></div>
-
-                <label>Schedule Time (Same day or later) *</label>
-                <input type="datetime-local" id="scheduleTime">
-
-                <button onclick="schedulePost()" class="primary-btn">📅 Schedule Post</button>
-            </div>
-        </div>
-
-        <!-- BATCH UPLOAD TAB -->
-        <div id="batch-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>📦 Batch Upload & Auto-Schedule</h2>
-                <p style="color: #888;">Upload multiple videos and auto-schedule them</p>
-                
-                <label>Select Channel *</label>
-                <select id="batchChannelSelect" onchange="setGuildFromChannel('batchChannelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
-                
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="batchManualChannelId" placeholder="Paste channel ID here...">
-
-                <label>Select Multiple Videos *</label>
-                <input type="file" id="batchFiles" multiple accept="video/*,image/*">
-                <small style="color: #888;">Select 2+ files</small>
-
-                <label>Post Interval (hours) *</label>
-                <input type="number" id="batchInterval" min="1" value="2" placeholder="Hours between posts">
-
-                <label>Start Time *</label>
-                <input type="datetime-local" id="batchStartTime">
-
-                <button onclick="batchUpload()" class="primary-btn">📅 Schedule All</button>
-            </div>
-        </div>
-
-        <!-- QUEUE TAB -->
-        <div id="queue-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>📋 Video Queue</h2>
-                <p style="color: #888;">Videos auto-post in sequence</p>
-                
-                <label>Select Channel *</label>
-                <select id="queueChannelSelect" onchange="setGuildFromChannel('queueChannelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
-                
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="queueManualChannelId" placeholder="Paste channel ID here...">
-
-                <label>Video Title</label>
-                <input type="text" id="queueTitle" placeholder="Video title...">
-
-                <label>Custom Message</label>
-                <textarea id="queueMessage" rows="3" placeholder="Optional message..."></textarea>
-
-                <label>Video URL</label>
-                <input type="text" id="queueVideoUrl" placeholder="https://youtube.com/...">
-
-                <label>Or Upload Video</label>
-                <input type="file" id="queueMediaFile">
-
-                <button onclick="addToQueue()" class="primary-btn">➕ Add to Queue</button>
-
-                <h3 style="margin-top: 30px;">Queue Items</h3>
-                <div id="queue-container">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- LIBRARY TAB -->
-        <div id="library-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>📚 Video Library</h2>
-                <p style="color: #888;">Save videos for quick reuse</p>
-
-                <label>Video Title *</label>
-                <input type="text" id="libTitle" placeholder="My awesome video">
-
-                <label>Category</label>
-                <input type="text" id="libCategory" placeholder="Memes, Tutorials, etc.">
-
-                <label>Video URL</label>
-                <input type="text" id="libVideoUrl" placeholder="https://youtube.com/...">
-
-                <label>Or Upload Video *</label>
-                <input type="file" id="libMediaFile">
-
-                <button onclick="saveToLibrary()" class="primary-btn">💾 Save to Library</button>
-
-                <h3 style="margin-top: 30px;">Your Library</h3>
-                <div id="library-container" class="library-grid">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- RECURRING TAB -->
-        <div id="recurring-tab" class="tab-content hidden">
-            <div class="tab-content-wrapper">
-                <div class="card">
-                    <h2>🔄 Recurring Posts</h2>
-                    <p style="color: #888; margin-bottom: 20px;">Choose a posting method:</p>
-                    
-                    <div style="display: flex; gap: 10px; margin-bottom: 30px;">
-                        <button onclick="showRecurringMethod('simple')" class="primary-btn" id="simple-btn">Simple</button>
-                        <button onclick="showRecurringMethod('advanced')" class="primary-btn" style="background: #4e5058;">Advanced</button>
-                    </div>
-                </div>
-                
-                <!-- SIMPLE RECURRING -->
-                <div id="simple-recurring" class="card">
-                    <h3>📅 Simple Recurring Post</h3>
-                    <p style="color: #888;">Auto-post same content every day/week/month</p>
-                    
-                    <label>Select Channel *</label>
-                    <select id="recurringChannelSelect" onchange="setGuildFromChannel('recurringChannelSelect')">
-                        <option value="">-- Loading Channels --</option>
-                    </select>
-                    
-                    <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                    <input type="text" id="recurringManualChannelId" placeholder="Paste channel ID here...">
-
-                    <label>Message *</label>
-                    <textarea id="recurringContent" rows="3" placeholder="Message to post..."></textarea>
-
-                    <label>Frequency *</label>
-                    <select id="recurringFrequency">
-                        <option value="">-- Select --</option>
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
-                    </select>
-
-                    <label>Video URL</label>
-                    <input type="text" id="recurringVideoUrl" placeholder="https://youtube.com/...">
-
-                    <label>Or Upload Video (up to 3 files)</label>
-                    <input type="file" id="recurringMediaFile" multiple accept="video/*,image/*">
-
-                    <button onclick="addRecurringPost()" class="primary-btn">✅ Create Recurring</button>
-
-                    <h3 style="margin-top: 30px;">Active Recurring Posts</h3>
-                    <div id="recurring-container">
-                        <p style="color: #888;">Loading...</p>
-                    </div>
-                </div>
-                
-                <!-- ADVANCED RECURRING -->
-                <div id="advanced-recurring" class="card hidden">
-                    <h3>📅 Advanced: Schedule by Day & Time</h3>
-                    <p style="color: #888; margin-bottom: 20px;">Pick different videos for each day and time slot</p>
-                    
-                    <label>Select Channel *</label>
-                    <select id="advancedChannelSelect">
-                        <option value="">-- Loading Channels --</option>
-                    </select>
-                    
-                    <div id="advanced-recurring-container">
-                        <p style="color: #888;">Loading...</p>
-                    </div>
-                    
-                    <button onclick="saveAdvancedRecurring()" class="primary-btn" style="margin-top: 20px;">💾 Save Advanced Schedule</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- TEMPLATES TAB -->
-        <div id="templates-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>🎨 Message Templates</h2>
-                <p style="color: #888;">Create reusable message templates</p>
-
-                <label>Template Name *</label>
-                <input type="text" id="tempName" placeholder="e.g., Daily Meme">
-
-                <label>Message Before Video</label>
-                <textarea id="tempBefore" rows="3" placeholder="🤣 Meme of the day:"></textarea>
-
-                <label>Message After Video</label>
-                <textarea id="tempAfter" rows="3" placeholder="Drop your thoughts!"></textarea>
-
-                <button onclick="saveTemplate()" class="primary-btn">💾 Save Template</button>
-
-                <h3 style="margin-top: 30px;">Your Templates</h3>
-                <div id="templates-container">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- BRANDING TAB -->
-        <div id="branding-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>🎭 Watermark & Branding</h2>
-                <p style="color: #888;">Add logos/watermarks to videos (coming soon)</p>
-
-                <label>Logo/Watermark Image</label>
-                <input type="file" id="brandingImage" accept="image/*">
-
-                <label>Position</label>
-                <select id="brandingPosition">
-                    <option value="top-left">Top Left</option>
-                    <option value="top-right">Top Right</option>
-                    <option value="bottom-left">Bottom Left</option>
-                    <option value="bottom-right" selected>Bottom Right</option>
-                    <option value="center">Center</option>
-                </select>
-
-                <label>Opacity (%)</label>
-                <input type="number" id="brandingOpacity" min="0" max="100" value="100">
-
-                <label>Text Watermark</label>
-                <input type="text" id="brandingText" placeholder="© Your Brand">
-
-                <button onclick="setBranding()" class="primary-btn">💾 Save Branding</button>
-            </div>
-        </div>
-
-        <!-- SCHEDULED POSTS TAB -->
-        <div id="scheduled-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>✅ Scheduled Posts</h2>
-                <p style="color: #888;">View and manage upcoming posts</p>
-                <div id="scheduled-posts">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- ANALYTICS TAB -->
-        <div id="analytics-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>📊 Analytics Dashboard</h2>
-                <p style="color: #888;">Track your posting activity</p>
-                <div id="analytics-container">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-                <button onclick="exportAllData()" class="primary-btn" style="margin-top: 20px;">💾 Export Backup</button>
-            </div>
-        </div>
-
-        <!-- HISTORY TAB -->
-        <div id="history-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>📜 Post History</h2>
-                <p style="color: #888;">Recent posts (last 50)</p>
-                <div id="history-container">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- TEST MODE TAB -->
-        <div id="test-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>🧪 Test Mode</h2>
-                <p style="color: #888;">Quick test: Channel → Title → Send (no schedule)</p>
-                
-                <label>Select Channel *</label>
-                <select id="testChannelSelect" onchange="setGuildFromChannel('testChannelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
-                
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="testManualChannelId" placeholder="Paste channel ID here...">
-
-                <label>Message</label>
-                <input type="text" id="testVideoTitle" placeholder="Test message...">
-
-                <label>Media File</label>
-                <input type="file" id="testMediaFile" onchange="testPreviewMedia()">
-                <div id="testPreview"></div>
-
-                <button onclick="testSend()" class="primary-btn">🚀 Send Test</button>
-            </div>
-        </div>
-
-        <!-- SUGGESTIONS TAB -->
-        <div id="suggest-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>💡 Feature Suggestions</h2>
-                <p style="color: #888; margin-bottom: 20px;">Have an idea? Share it with us!</p>
-                
-                <p style="color: #888; font-size: 0.9em; margin-bottom: 10px;">📢 You can also use Discord command: <code style="background: #1e1f22; padding: 2px 6px; border-radius: 3px;">!suggest [idea], [details]</code></p>
-
-                <label>Your Idea *</label>
-                <input type="text" id="suggestionIdea" placeholder="e.g., Add video compression feature">
-
-                <label>Additional Details (Optional)</label>
-                <textarea id="suggestionDetails" rows="3" placeholder="Links, examples, more info..."></textarea>
-
-                <label>Your Name (Optional)</label>
-                <input type="text" id="suggestionName" placeholder="Anonymous">
-
-                <button onclick="submitSuggestion()" class="primary-btn">✓ Submit Suggestion</button>
-
-                <h3 style="margin-top: 30px;">📋 All Suggestions</h3>
-                <div id="suggestions-container">
-                    <p style="color: #888;">Loading...</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="script.js"></script>
-    <script>
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.add('hidden');
-            });
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            
-            document.getElementById(tabName + '-tab').classList.remove('hidden');
-            event.target.classList.add('active');
-        }
-    </script>
+<!-- LOGIN -->
+<div id="login" class="card">
+  <h1>🤖 Discord Bot Manager</h1>
+  <input type="password" id="password" placeholder="Admin Password">
+  <button onclick="login()">Login</button>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+
+  <div class="tabs">
+    <button onclick="showTab('send')" class="active">Send</button>
+    <button onclick="showTab('schedule')">Schedule</button>
+    <button onclick="showTab('test')">Test</button>
+    <button onclick="showTab('scheduled')">Scheduled</button>
+    <button onclick="showTab('history')">History</button>
+  </div>
+
+  <!-- SEND -->
+  <div id="send" class="tab">
+    <h2>📤 Send Now</h2>
+    <select id="sendChannel"></select>
+    <textarea id="sendText" placeholder="Message"></textarea>
+    <input type="file" id="sendFiles" multiple>
+    <button onclick="sendNow()">Send</button>
+  </div>
+
+  <!-- SCHEDULE -->
+  <div id="schedule" class="tab hidden">
+    <h2>⏰ Schedule Post</h2>
+    <select id="scheduleChannel"></select>
+    <textarea id="scheduleText" placeholder="Message"></textarea>
+    <input type="file" id="scheduleFiles" multiple>
+    <input type="datetime-local" id="scheduleTime">
+    <button onclick="schedulePost()">Schedule</button>
+  </div>
+
+  <!-- TEST -->
+  <div id="test" class="tab hidden">
+    <h2>🧪 Test Mode</h2>
+    <select id="testChannel"></select>
+    <input type="text" id="testText" placeholder="Test message">
+    <input type="file" id="testFiles" multiple>
+    <button onclick="testSend()">Send Test</button>
+  </div>
+
+  <!-- SCHEDULED -->
+  <div id="scheduled" class="tab hidden">
+    <h2>📋 Scheduled Posts</h2>
+    <div id="scheduledList"></div>
+  </div>
+
+  <!-- HISTORY -->
+  <div id="history" class="tab hidden">
+    <h2>📜 History</h2>
+    <div id="historyList"></div>
+  </div>
+
+</div>
+
+<script src="script.js"></script>
 </body>
 </html>
