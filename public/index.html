@@ -59,8 +59,9 @@
                 <label>Message Content</label>
                 <textarea id="postContent" rows="4" placeholder="Enter your message..."></textarea>
 
-                <label>Add Media (Optional)</label>
-                <input type="file" id="mediaFile" onchange="previewMedia()">
+                <label>Add Media (Optional - Up to 3 files)</label>
+                <input type="file" id="mediaFile" onchange="previewMedia()" multiple accept="video/*,image/*">
+                <small style="color: #888;">Max 3 files, 25MB each</small>
                 <div id="preview-container"></div>
 
                 <button onclick="sendPost()" class="primary-btn">🚀 Send Now</button>
@@ -86,8 +87,9 @@
                 <label>Message Content</label>
                 <textarea id="schedulePostContent" rows="4" placeholder="Enter your message..."></textarea>
 
-                <label>Add Media (Optional)</label>
-                <input type="file" id="scheduleMediaFile" onchange="schedulePreviewMedia()">
+                <label>Add Media (Optional - Up to 3 files)</label>
+                <input type="file" id="scheduleMediaFile" onchange="schedulePreviewMedia()" multiple accept="video/*,image/*">
+                <small style="color: #888;">Max 3 files, 25MB each</small>
                 <div id="schedulePreview"></div>
 
                 <label>Schedule Time (Same day or later) *</label>
@@ -189,40 +191,70 @@
 
         <!-- RECURRING TAB -->
         <div id="recurring-tab" class="tab-content hidden">
-            <div class="card">
-                <h2>🔄 Recurring Posts</h2>
-                <p style="color: #888;">Auto-post on schedule (daily, weekly, monthly)</p>
+            <div class="tab-content-wrapper">
+                <div class="card">
+                    <h2>🔄 Recurring Posts</h2>
+                    <p style="color: #888; margin-bottom: 20px;">Choose a posting method:</p>
+                    
+                    <div style="display: flex; gap: 10px; margin-bottom: 30px;">
+                        <button onclick="showRecurringMethod('simple')" class="primary-btn" id="simple-btn">Simple</button>
+                        <button onclick="showRecurringMethod('advanced')" class="primary-btn" style="background: #4e5058;">Advanced</button>
+                    </div>
+                </div>
                 
-                <label>Select Channel *</label>
-                <select id="recurringChannelSelect" onchange="setGuildFromChannel('recurringChannelSelect')">
-                    <option value="">-- Loading Channels --</option>
-                </select>
+                <!-- SIMPLE RECURRING -->
+                <div id="simple-recurring" class="card">
+                    <h3>📅 Simple Recurring Post</h3>
+                    <p style="color: #888;">Auto-post same content every day/week/month</p>
+                    
+                    <label>Select Channel *</label>
+                    <select id="recurringChannelSelect" onchange="setGuildFromChannel('recurringChannelSelect')">
+                        <option value="">-- Loading Channels --</option>
+                    </select>
+                    
+                    <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
+                    <input type="text" id="recurringManualChannelId" placeholder="Paste channel ID here...">
+
+                    <label>Message *</label>
+                    <textarea id="recurringContent" rows="3" placeholder="Message to post..."></textarea>
+
+                    <label>Frequency *</label>
+                    <select id="recurringFrequency">
+                        <option value="">-- Select --</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+
+                    <label>Video URL</label>
+                    <input type="text" id="recurringVideoUrl" placeholder="https://youtube.com/...">
+
+                    <label>Or Upload Video (up to 3 files)</label>
+                    <input type="file" id="recurringMediaFile" multiple accept="video/*,image/*">
+
+                    <button onclick="addRecurringPost()" class="primary-btn">✅ Create Recurring</button>
+
+                    <h3 style="margin-top: 30px;">Active Recurring Posts</h3>
+                    <div id="recurring-container">
+                        <p style="color: #888;">Loading...</p>
+                    </div>
+                </div>
                 
-                <label style="font-size: 0.85em; color: #888;">Or enter Channel ID (optional)</label>
-                <input type="text" id="recurringManualChannelId" placeholder="Paste channel ID here...">
-
-                <label>Message *</label>
-                <textarea id="recurringContent" rows="3" placeholder="Message to post..."></textarea>
-
-                <label>Frequency *</label>
-                <select id="recurringFrequency">
-                    <option value="">-- Select --</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                </select>
-
-                <label>Video URL</label>
-                <input type="text" id="recurringVideoUrl" placeholder="https://youtube.com/...">
-
-                <label>Or Upload Video</label>
-                <input type="file" id="recurringMediaFile">
-
-                <button onclick="addRecurringPost()" class="primary-btn">✅ Create Recurring</button>
-
-                <h3 style="margin-top: 30px;">Active Recurring Posts</h3>
-                <div id="recurring-container">
-                    <p style="color: #888;">Loading...</p>
+                <!-- ADVANCED RECURRING -->
+                <div id="advanced-recurring" class="card hidden">
+                    <h3>📅 Advanced: Schedule by Day & Time</h3>
+                    <p style="color: #888; margin-bottom: 20px;">Pick different videos for each day and time slot</p>
+                    
+                    <label>Select Channel *</label>
+                    <select id="advancedChannelSelect">
+                        <option value="">-- Loading Channels --</option>
+                    </select>
+                    
+                    <div id="advanced-recurring-container">
+                        <p style="color: #888;">Loading...</p>
+                    </div>
+                    
+                    <button onclick="saveAdvancedRecurring()" class="primary-btn" style="margin-top: 20px;">💾 Save Advanced Schedule</button>
                 </div>
             </div>
         </div>
