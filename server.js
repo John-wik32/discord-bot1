@@ -482,6 +482,7 @@ const discordClient = new Client({
 
 discordClient.once('ready', async () => {
   console.log(`✓ Bot logged in as ${discordClient.user.tag}`);
+  console.log(`✓ Bot is in ${discordClient.guilds.cache.size} servers`);
   
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
   
@@ -498,7 +499,7 @@ discordClient.once('ready', async () => {
     await rest.put(Routes.applicationCommands(discordClient.user.id), { body: commands.map(cmd => cmd.toJSON()) });
     console.log('✓ Slash commands registered');
   } catch (error) {
-    console.error('Error registering commands:', error);
+    console.error('Error registering commands:', error.message);
   }
 });
 
@@ -635,9 +636,19 @@ discordClient.on('interactionCreate', async (interaction) => {
   }
 });
 
-discordClient.on('error', err => console.error('Discord error:', err));
+discordClient.on('error', err => {
+  console.error('❌ Discord Client Error:', err.message);
+  console.error(err);
+});
+
+discordClient.on('warn', msg => {
+  console.warn('⚠️ Discord Warning:', msg);
+});
+
 discordClient.login(DISCORD_TOKEN).catch(err => {
-  console.error('Login error:', err.message);
+  console.error('❌ Failed to login to Discord:', err.message);
+  console.error('Make sure DISCORD_TOKEN is set correctly in environment variables');
+  console.error('Full error:', err);
 });
 
 const scheduledTasks = new Map();
