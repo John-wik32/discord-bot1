@@ -328,9 +328,8 @@
   </div>
   
   <script>
-    // IMPORTANT: Update this to your Koyeb backend URL
-    // Example: https://your-service-xxxxx.koyeb.app
-    const API_URL = 'https://your-koyeb-url-here.koyeb.app'; // ← CHANGE THIS TO YOUR KOYEB URL
+    // Use the same origin (Koyeb) for API calls
+    const API_URL = window.location.origin;
     
     let selectedFiles = [];
     let isScheduling = false;
