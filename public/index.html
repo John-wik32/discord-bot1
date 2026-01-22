@@ -7,11 +7,10 @@
 
 <style>
 body {
-  font-family: Arial, sans-serif;
-  background: linear-gradient(135deg,#667eea,#764ba2);
-  min-height:100vh;
   margin:0;
   padding:20px;
+  font-family:Arial, sans-serif;
+  background:linear-gradient(135deg,#667eea,#764ba2);
 }
 .tabs {
   display:flex;
@@ -23,7 +22,7 @@ body {
   padding:10px 20px;
   border:none;
   border-radius:6px;
-  background:#ffffff44;
+  background:#ffffff55;
   color:white;
   cursor:pointer;
 }
@@ -35,18 +34,11 @@ body {
   max-width:800px;
   margin:auto;
   background:white;
-  border-radius:10px;
   padding:20px;
+  border-radius:10px;
 }
 .page { display:none; }
 .page.active { display:block; }
-.file-item {
-  background:#f5f5f5;
-  padding:6px;
-  margin:5px 0;
-  display:flex;
-  justify-content:space-between;
-}
 .message {
   padding:10px;
   margin-bottom:10px;
@@ -55,14 +47,21 @@ body {
 .message.show { display:block; }
 .message.error { background:#f8d7da; }
 .message.success { background:#d4edda; }
+.file-item {
+  background:#eee;
+  padding:6px;
+  margin:5px 0;
+  display:flex;
+  justify-content:space-between;
+}
 </style>
 </head>
 
 <body>
 
 <div class="tabs">
-  <button class="tab-btn active" onclick="switchPage('create')">Create</button>
-  <button class="tab-btn" onclick="switchPage('schedules')">Schedules</button>
+  <button class="tab-btn active" data-page="create">Create</button>
+  <button class="tab-btn" data-page="schedules">Schedules</button>
 </div>
 
 <div class="container">
@@ -96,11 +95,14 @@ body {
 const API_URL = window.location.origin;
 let selectedFiles = [];
 
-function switchPage(page) {
-  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-  document.getElementById(page).classList.add("active");
-}
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById(btn.dataset.page).classList.add("active");
+    btn.classList.add("active");
+  });
+});
 
 function showMessage(text, type) {
   const msg = document.getElementById("message");
@@ -127,10 +129,10 @@ async function loadChannels() {
   const select = document.getElementById("channel");
   select.innerHTML = "<option value=''>Select channel</option>";
   channels.forEach(c => {
-    const opt = document.createElement("option");
-    opt.value = c.id;
-    opt.textContent = c.guild + " - " + c.name;
-    select.appendChild(opt);
+    const o = document.createElement("option");
+    o.value = c.id;
+    o.textContent = c.guild + " - " + c.name;
+    select.appendChild(o);
   });
 }
 
@@ -163,18 +165,18 @@ document.getElementById("sendNowBtn").addEventListener("click", async () => {
   const formData = new FormData();
   selectedFiles.forEach(f => formData.append("files", f));
 
-  const up = await fetch(API_URL + "/api/upload", {
-    method:"POST",
-    headers:{ "x-dashboard-pwd": pwd },
+  const res = await fetch(API_URL + "/api/upload", {
+    method: "POST",
+    headers: { "x-dashboard-pwd": pwd },
     body: formData
   });
 
-  if (!up.ok) {
+  if (!res.ok) {
     showMessage("Upload failed", "error");
     return;
   }
 
-  showMessage("Files uploaded (send logic ready)", "success");
+  showMessage("Files uploaded successfully", "success");
 });
 </script>
 
