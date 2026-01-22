@@ -57,18 +57,52 @@ const dashboardHTML = `<!DOCTYPE html>
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
       padding: 20px;
+    }
+    
+    .page {
+      display: none;
+    }
+    
+    .page.active {
+      display: block;
+    }
+    
+    .tabs {
       display: flex;
-      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
       justify-content: center;
+    }
+    
+    .tab-btn {
+      padding: 12px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      border: 2px solid white;
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    .tab-btn.active {
+      background: white;
+      color: #667eea;
+    }
+    
+    .tab-btn:hover {
+      transform: translateY(-2px);
     }
     
     .container {
       width: 100%;
-      max-width: 600px;
+      max-width: 700px;
       background: white;
       border-radius: 12px;
       box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
       overflow: hidden;
+      margin: 0 auto;
     }
     
     .header {
@@ -294,62 +328,235 @@ const dashboardHTML = `<!DOCTYPE html>
         transform: translateY(0);
       }
     }
+    
+    /* Schedules Page Styles */
+    .schedules-list {
+      max-height: 600px;
+      overflow-y: auto;
+    }
+    
+    .schedule-card {
+      background: #f8f9ff;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 15px;
+      transition: all 0.3s;
+    }
+    
+    .schedule-card:hover {
+      border-color: #667eea;
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+    }
+    
+    .schedule-card.editing {
+      border-color: #667eea;
+      background: #fff;
+    }
+    
+    .schedule-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 12px;
+    }
+    
+    .schedule-title {
+      font-weight: 600;
+      color: #333;
+      margin: 0;
+      word-break: break-word;
+    }
+    
+    .schedule-time {
+      color: #666;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    
+    .schedule-channel {
+      color: #667eea;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    
+    .schedule-files {
+      margin-top: 12px;
+      padding: 10px;
+      background: white;
+      border-radius: 4px;
+      max-height: 150px;
+      overflow-y: auto;
+      font-size: 12px;
+    }
+    
+    .schedule-file {
+      padding: 6px 0;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .schedule-file:last-child {
+      border-bottom: none;
+    }
+    
+    .schedule-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    
+    .btn-edit, .btn-cancel, .btn-delete, .btn-save {
+      padding: 8px 12px;
+      font-size: 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-edit {
+      background: #667eea;
+      color: white;
+    }
+    
+    .btn-edit:hover {
+      background: #5568d3;
+    }
+    
+    .btn-delete {
+      background: #ff4444;
+      color: white;
+    }
+    
+    .btn-delete:hover {
+      background: #cc0000;
+    }
+    
+    .btn-save {
+      background: #28a745;
+      color: white;
+      grid-column: 1 / 3;
+    }
+    
+    .btn-save:hover {
+      background: #218838;
+    }
+    
+    .btn-cancel {
+      background: #999;
+      color: white;
+    }
+    
+    .btn-cancel:hover {
+      background: #777;
+    }
+    
+    .edit-fields {
+      display: none;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #ddd;
+    }
+    
+    .edit-fields.show {
+      display: block;
+    }
+    
+    .edit-fields input {
+      margin-bottom: 10px;
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #999;
+    }
+    
+    .empty-state p {
+      font-size: 16px;
+      margin-bottom: 10px;
+    }
   </style>
 </head>
 <body>
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchPage('create')">📤 Create Post</button>
+    <button class="tab-btn" onclick="switchPage('schedules')">📅 Active Schedules</button>
+  </div>
+
   <div class="container">
     <div class="header">
       <h1>📢 Discord Media Poster</h1>
       <p>Post images & videos to Discord channels</p>
     </div>
     
-    <div class="form-section">
-      <div id="message" class="message"></div>
-      
-      <form id="mediaForm">
-        <div class="form-group">
-          <label>Dashboard Password</label>
-          <input type="password" id="password" placeholder="Enter dashboard password">
-        </div>
+    <!-- CREATE POST PAGE -->
+    <div id="create" class="page active">
+      <div class="form-section">
+        <div id="message" class="message"></div>
         
-        <div class="form-group">
-          <label>Discord Channel</label>
-          <select id="channel" required>
-            <option value="">Loading channels...</option>
-          </select>
-        </div>
-        
-        <div class="form-group">
-          <label>Post Title (Optional)</label>
-          <input type="text" id="title" placeholder="What's this post about?">
-        </div>
-        
-        <div class="form-group">
-          <label>Upload Media Files</label>
-          <div class="file-upload" id="fileUpload">
-            <div class="file-upload-text">Click or drag files here</div>
-            <div class="file-upload-subtext">Supported: PNG, JPG, GIF, MP4, MOV, WebM (up to 25MB each)</div>
-            <input type="file" id="fileInput" multiple accept="image/*,video/*">
-          </div>
-          <div class="file-list" id="fileList"></div>
-        </div>
-        
-        <div class="schedule-fields" id="scheduleFields">
+        <form id="mediaForm">
           <div class="form-group">
-            <label>Date</label>
-            <input type="date" id="scheduleDate">
+            <label>Dashboard Password</label>
+            <input type="password" id="password" placeholder="Enter dashboard password">
           </div>
+          
           <div class="form-group">
-            <label>Time</label>
-            <input type="time" id="scheduleTime">
+            <label>Discord Channel</label>
+            <select id="channel" required>
+              <option value="">Loading channels...</option>
+            </select>
           </div>
+          
+          <div class="form-group">
+            <label>Post Title (Optional)</label>
+            <input type="text" id="title" placeholder="What's this post about?">
+          </div>
+          
+          <div class="form-group">
+            <label>Upload Media Files</label>
+            <div class="file-upload" id="fileUpload">
+              <div class="file-upload-text">Click or drag files here</div>
+              <div class="file-upload-subtext">Supported: PNG, JPG, GIF, MP4, MOV, WebM (up to 25MB each)</div>
+              <input type="file" id="fileInput" multiple accept="image/*,video/*">
+            </div>
+            <div class="file-list" id="fileList"></div>
+          </div>
+          
+          <div class="schedule-fields" id="scheduleFields">
+            <div class="form-group">
+              <label>Date</label>
+              <input type="date" id="scheduleDate">
+            </div>
+            <div class="form-group">
+              <label>Time</label>
+              <input type="time" id="scheduleTime">
+            </div>
+          </div>
+          
+          <div class="button-group">
+            <button type="button" class="btn-send" id="sendNowBtn">📤 Send Now</button>
+            <button type="button" class="btn-schedule" id="scheduleBtn">⏰ Schedule</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    
+    <!-- SCHEDULES PAGE -->
+    <div id="schedules" class="page">
+      <div class="form-section">
+        <div id="schedulesMessage" class="message"></div>
+        <h2 style="margin-bottom: 20px; color: #333;">📅 Active Scheduled Posts</h2>
+        <div class="schedules-list" id="schedulesList"></div>
+        <div id="emptySchedules" class="empty-state">
+          <p>No scheduled posts yet</p>
+          <p style="font-size: 12px;">Create a scheduled post to see it here</p>
         </div>
-        
-        <div class="button-group">
-          <button type="button" class="btn-send" id="sendNowBtn">📤 Send Now</button>
-          <button type="button" class="btn-schedule" id="scheduleBtn">⏰ Schedule</button>
-        </div>
-      </form>
+      </div>
     </div>
   </div>
   
@@ -358,13 +565,29 @@ const dashboardHTML = `<!DOCTYPE html>
     
     let selectedFiles = [];
     let isScheduling = false;
+    let allSchedules = [];
+    let currentPassword = '';
     
     const urlParams = new URLSearchParams(window.location.search);
     const urlPassword = urlParams.get('pwd');
     if (urlPassword) {
       document.getElementById('password').value = urlPassword;
+      currentPassword = urlPassword;
     }
     
+    // Tab switching
+    function switchPage(page) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(page).classList.add('active');
+      event.target.classList.add('active');
+      
+      if (page === 'schedules') {
+        loadSchedules();
+      }
+    }
+    
+    // File upload handling
     const fileUpload = document.getElementById('fileUpload');
     const fileInput = document.getElementById('fileInput');
     const fileList = document.getElementById('fileList');
@@ -416,6 +639,7 @@ const dashboardHTML = `<!DOCTYPE html>
     
     async function loadChannels() {
       const pwd = document.getElementById('password').value;
+      currentPassword = pwd;
       if (!pwd) {
         showMessage('Please enter the dashboard password', 'info');
         return;
@@ -574,6 +798,8 @@ const dashboardHTML = `<!DOCTYPE html>
         document.getElementById('mediaForm').reset();
         document.getElementById('scheduleFields').classList.remove('show');
         isScheduling = false;
+        
+        setTimeout(() => loadSchedules(), 1000);
       } catch (err) {
         showMessage('Error: ' + err.message, 'error');
       } finally {
@@ -581,255 +807,109 @@ const dashboardHTML = `<!DOCTYPE html>
       }
     });
     
-    function showMessage(text, type) {
-      const msg = document.getElementById('message');
-      msg.textContent = text;
-      msg.className = \`message show \${type}\`;
+    async function loadSchedules() {
+      if (!currentPassword) {
+        showSchedulesMessage('Please enter password first', 'info');
+        return;
+      }
       
-      if (type === 'success' || type === 'error') {
-        setTimeout(() => msg.classList.remove('show'), 5000);
-      }
-    }
-    
-    if (urlPassword) {
-      loadChannels();
-    }
-  </script>
-</body>
-</html>`;
-
-app.get('/', (req, res) => {
-  res.send(dashboardHTML);
-});
-
-// Discord Bot Setup
-const discordClient = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
-});
-
-discordClient.once('ready', () => {
-  console.log(`✓ Discord bot logged in as ${discordClient.user.tag}`);
-  console.log(`✓ Bot has access to ${discordClient.guilds.cache.size} guild(s)`);
-});
-
-discordClient.on('error', err => console.error('Discord bot error:', err));
-discordClient.on('warn', msg => console.warn('Discord bot warn:', msg));
-
-discordClient.login(DISCORD_TOKEN).catch(err => {
-  console.error('Failed to login to Discord:', err.message);
-  console.error('Check that DISCORD_TOKEN is valid and the bot has not been revoked');
-});
-
-// Scheduler Map - in-memory task storage
-const scheduledTasks = new Map();
-
-// Load persisted schedules on startup
-function loadSchedules() {
-  try {
-    const files = fs.readdirSync(schedulesDir);
-    console.log(`Loading ${files.length} scheduled posts...`);
-    
-    files.forEach(file => {
       try {
-        const data = JSON.parse(fs.readFileSync(path.join(schedulesDir, file), 'utf8'));
-        const taskId = data.id;
-        const now = new Date();
-        const schedTime = new Date(data.scheduledTime);
-        
-        if (schedTime > now) {
-          schedulePost(data);
-          console.log(`✓ Loaded scheduled post: ${taskId}`);
-        } else {
-          fs.unlinkSync(path.join(schedulesDir, file));
-        }
-      } catch (err) {
-        console.error(`Error loading schedule ${file}:`, err.message);
-      }
-    });
-  } catch (err) {
-    console.error('Error loading schedules:', err.message);
-  }
-}
-
-function schedulePost(data) {
-  const taskId = data.id;
-  const schedTime = new Date(data.scheduledTime);
-  
-  const cronExpression = `${schedTime.getSeconds()} ${schedTime.getMinutes()} ${schedTime.getHours()} ${schedTime.getDate()} ${schedTime.getMonth() + 1} *`;
-  
-  try {
-    const task = cron.schedule(cronExpression, async () => {
-      console.log(`⏰ Executing scheduled post: ${taskId}`);
-      try {
-        await sendPostToDiscord(data.channelId, data.title, data.files);
-        task.stop();
-        scheduledTasks.delete(taskId);
-        fs.unlinkSync(path.join(schedulesDir, `${taskId}.json`));
-        data.files.forEach(f => {
-          try { fs.unlinkSync(f); } catch (e) {}
+        const res = await fetch(\`\${API_URL}/api/schedules\`, {
+          headers: { 'x-dashboard-pwd': currentPassword }
         });
-        console.log(`✓ Scheduled post executed: ${taskId}`);
+        
+        if (!res.ok) throw new Error('Failed to load schedules');
+        
+        allSchedules = await res.json();
+        renderSchedules();
       } catch (err) {
-        console.error(`✗ Error executing scheduled post ${taskId}:`, err.message);
-      }
-    });
-    
-    scheduledTasks.set(taskId, task);
-  } catch (err) {
-    console.error(`Error scheduling post ${taskId}:`, err.message);
-  }
-}
-
-async function sendPostToDiscord(channelId, title, filePaths) {
-  try {
-    const channel = await discordClient.channels.fetch(channelId);
-    
-    if (!channel) {
-      throw new Error('Channel not found');
-    }
-    
-    if (!channel.isSendable?.()) {
-      throw new Error('Channel is not sendable (check bot permissions)');
-    }
-    
-    const attachments = filePaths.filter(f => fs.existsSync(f));
-    
-    if (attachments.length === 0) {
-      await channel.send(title || 'Empty post');
-    } else {
-      await channel.send({
-        content: title || '',
-        files: attachments
-      });
-    }
-    
-    return true;
-  } catch (err) {
-    console.error('Error sending to Discord:', err);
-    throw err;
-  }
-}
-
-// ===== API ENDPOINTS =====
-
-// Auth middleware
-function authMiddleware(req, res, next) {
-  const pwd = req.headers['x-dashboard-pwd'] || req.query.pwd;
-  if (!pwd || pwd !== DASHBOARD_PASSWORD) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  next();
-}
-
-// Health check endpoint (no auth)
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    bot: discordClient.readyAt ? 'ready' : 'connecting',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Get available Discord channels
-app.get('/api/channels', authMiddleware, async (req, res) => {
-  try {
-    if (!discordClient.readyAt) {
-      return res.status(503).json({ error: 'Discord bot not ready yet. Try again in a few seconds.' });
-    }
-    
-    const channels = [];
-    const guilds = discordClient.guilds.cache;
-    
-    if (guilds.size === 0) {
-      return res.status(400).json({ error: 'Bot is not in any Discord servers' });
-    }
-    
-    for (const guild of guilds.values()) {
-      for (const channel of guild.channels.cache.values()) {
-        if (channel.isSendable?.() && 
-            (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement)) {
-          channels.push({
-            id: channel.id,
-            name: `#${channel.name}`,
-            guild: guild.name
-          });
-        }
+        showSchedulesMessage('Error loading schedules: ' + err.message, 'error');
       }
     }
     
-    res.json(channels);
-  } catch (err) {
-    console.error('Error fetching channels:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Upload media
-app.post('/api/upload', authMiddleware, upload.array('files', 10), (req, res) => {
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json({ error: 'No files uploaded' });
-  }
-  
-  const filePaths = req.files.map(f => path.join(uploadsDir, f.filename));
-  res.json({ files: filePaths, count: filePaths.length });
-});
-
-// Send immediately
-app.post('/api/send-now', authMiddleware, async (req, res) => {
-  const { channelId, title, files } = req.body;
-  
-  if (!channelId || !files || files.length === 0) {
-    return res.status(400).json({ error: 'Missing channelId or files' });
-  }
-  
-  try {
-    await sendPostToDiscord(channelId, title, files);
+    function renderSchedules() {
+      const list = document.getElementById('schedulesList');
+      const empty = document.getElementById('emptySchedules');
+      
+      if (allSchedules.length === 0) {
+        list.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+      }
+      
+      empty.style.display = 'none';
+      list.innerHTML = allSchedules.map(sched => \`
+        <div class="schedule-card" id="card-\${sched.id}">
+          <div class="schedule-header">
+            <div>
+              <h3 class="schedule-title" id="title-\${sched.id}">\${sched.title || 'Untitled'}</h3>
+              <div class="schedule-time">⏰ \${new Date(sched.scheduledTime).toLocaleString()}</div>
+              <div class="schedule-channel">📍 Channel ID: \${sched.channelId}</div>
+            </div>
+          </div>
+          
+          <div class="schedule-files" id="files-\${sched.id}">
+            \${sched.files.map(f => \`<div class="schedule-file"><span>\${f.split('/').pop()}</span></div>\`).join('')}
+          </div>
+          
+          <div class="edit-fields" id="edit-\${sched.id}">
+            <label>New Title</label>
+            <input type="text" class="edit-title" value="\${sched.title || ''}" placeholder="Update title">
+          </div>
+          
+          <div class="schedule-actions">
+            <button class="btn-edit" onclick="editSchedule('\${sched.id}')">✏️ Edit</button>
+            <button class="btn-cancel" onclick="cancelEdit('\${sched.id}')" style="display:none;" id="cancel-\${sched.id}">Cancel</button>
+            <button class="btn-save" onclick="saveSchedule('\${sched.id}')" style="display:none;" id="save-\${sched.id}">💾 Save</button>
+            <button class="btn-delete" onclick="deleteSchedule('\${sched.id}')">🗑️ Delete</button>
+          </div>
+        </div>
+      \`).join('');
+    }
     
-    files.forEach(f => {
-      try { fs.unlinkSync(f); } catch (e) {}
-    });
+    function editSchedule(id) {
+      const card = document.getElementById(\`card-\${id}\`);
+      const editFields = document.getElementById(\`edit-\${id}\`);
+      const editBtn = card.querySelector('.btn-edit');
+      const saveBtn = document.getElementById(\`save-\${id}\`);
+      const cancelBtn = document.getElementById(\`cancel-\${id}\`);
+      
+      card.classList.add('editing');
+      editFields.classList.add('show');
+      editBtn.style.display = 'none';
+      saveBtn.style.display = 'block';
+      cancelBtn.style.display = 'block';
+    }
     
-    res.json({ success: true, message: 'Post sent!' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Schedule post
-app.post('/api/schedule', authMiddleware, (req, res) => {
-  const { channelId, title, files, scheduledTime } = req.body;
-  
-  if (!channelId || !files || !scheduledTime) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-  
-  const schedTime = new Date(scheduledTime);
-  if (schedTime <= new Date()) {
-    return res.status(400).json({ error: 'Scheduled time must be in the future' });
-  }
-  
-  const taskId = `task-${Date.now()}`;
-  const schedData = { id: taskId, channelId, title, files, scheduledTime };
-  
-  try {
-    fs.writeFileSync(path.join(schedulesDir, `${taskId}.json`), JSON.stringify(schedData));
-    schedulePost(schedData);
-    res.json({ success: true, taskId, message: 'Post scheduled!' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`\n╔════════════════════════════════════════╗`);
-  console.log(`║  Discord Media Bot - Server Running     ║`);
-  console.log(`╠════════════════════════════════════════╣`);
-  console.log(`║  Port: ${PORT}                            ║`);
-  console.log(`║  Dashboard: http://localhost:${PORT}        ║`);
-  console.log(`║  Health: http://localhost:${PORT}/health   ║`);
-  console.log(`║  Waiting for Discord bot to connect...  ║`);
-  console.log(`╚════════════════════════════════════════╝\n`);
-  
-  setTimeout(() => loadSchedules(), 3000);
-});
+    function cancelEdit(id) {
+      const card = document.getElementById(\`card-\${id}\`);
+      const editFields = document.getElementById(\`edit-\${id}\`);
+      const editBtn = card.querySelector('.btn-edit');
+      const saveBtn = document.getElementById(\`save-\${id}\`);
+      const cancelBtn = document.getElementById(\`cancel-\${id}\`);
+      
+      card.classList.remove('editing');
+      editFields.classList.remove('show');
+      editBtn.style.display = 'block';
+      saveBtn.style.display = 'none';
+      cancelBtn.style.display = 'none';
+    }
+    
+    async function saveSchedule(id) {
+      const newTitle = document.querySelector(\`#edit-\${id} .edit-title\`).value;
+      
+      try {
+        const res = await fetch(\`\${API_URL}/api/schedule/\${id}\`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-dashboard-pwd': currentPassword
+          },
+          body: JSON.stringify({ title: newTitle })
+        });
+        
+        if (!res.ok) throw new Error('Failed to save');
+        
+        const idx = allSchedules.findIndex(s => s.id === id);
+        if (idx !== -1) {
+          allSchedul
