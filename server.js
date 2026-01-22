@@ -34,6 +34,9 @@ app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
+// Serve static files (dashboard)
+app.use(express.static('public'));
+
 // Health check endpoint (no auth)
 app.get('/health', (req, res) => {
   res.json({ 
