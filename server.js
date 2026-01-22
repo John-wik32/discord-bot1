@@ -45,9 +45,12 @@ app.use((req, res, next) => {
 
 // Serve dashboard
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html')).catch(() => {
-    res.send('Dashboard not found. Make sure public/index.html exists.');
-  });
+  const filePath = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.send('Dashboard file not found. Make sure public/index.html exists.');
+  }
 });
 
 const discordClient = new Client({
