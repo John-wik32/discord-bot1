@@ -1,46 +1,36 @@
 // server.js
 const express = require("express");
-const fs = require("fs");
 const path = require("path");
-const multer = require("multer");
 const { Client, GatewayIntentBits } = require("discord.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 
-// ===== DIRECTORIES =====
+// ===== EXPRESS =====
 const publicDir = path.join(__dirname, "public");
-const uploadsDir = path.join(__dirname, "uploads");
 
-// Create folders if missing
-if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-// ===== EXPRESS SETUP =====
-app.use(express.static(publicDir));
 app.use(express.json());
+app.use(express.static(publicDir));
 
-// ===== FILE UPLOAD =====
-const upload = multer({ dest: uploadsDir });
-
-app.post("/upload", upload.array("videos"), (req, res) => {
-  res.json({ success: true, files: req.files.map(f => f.filename) });
-});
-
-// ===== ROOT ROUTE =====
+// Serve dashboard
 app.get("/", (req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
 
-// ===== START WEB SERVER =====
+// Health check (important for Koyeb)
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
+});
+
+// Start web server
 app.listen(PORT, () => {
-  console.log(`🌐 Web dashboard running on port ${PORT}`);
+  console.log(`🌐 Web server running on port ${PORT}`);
 });
 
 // ===== DISCORD BOT =====
 if (!DISCORD_TOKEN) {
-  console.error("❌ DISCORD_TOKEN missing");
+  console.error("❌ DISCORD_TOKEN not set");
   process.exit(1);
 }
 
