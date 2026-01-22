@@ -12,480 +12,208 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || 'admin123';
 
 console.log('🚀 Starting Discord Media Bot...');
-console.log(`📝 DISCORD_TOKEN: ${DISCORD_TOKEN ? '✓ Set' : '✗ Missing'}`);
-console.log(`🔐 DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}`);
 
 if (!DISCORD_TOKEN) {
   console.error('❌ ERROR: DISCORD_TOKEN environment variable is required');
   process.exit(1);
 }
 
-// Ensure directories exist
+// Directories
 const uploadsDir = path.join(__dirname, 'uploads');
 const schedulesDir = path.join(__dirname, 'schedules');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 if (!fs.existsSync(schedulesDir)) fs.mkdirSync(schedulesDir, { recursive: true });
 
-// Storage configuration
+// Storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
 const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 
+// Track active users
+let activeUsers = new Set();
+setInterval(() => { activeUsers.clear(); }, 30 * 60 * 1000);
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-// ===== SERVE FRONTEND =====
-const dashboardHTML = `<!DOCTYPE html>
+app.use((req, res, next) => {
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+  activeUsers.add(clientIp);
+  next();
+});
+
+// Discord Bot
+const discordClient = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+});
+
+discordClient.once('ready', () => {
+  console.log(`✓ Discord bot logged in as ${discordClient.user.tag}`);
+});
+
+discordClient.on('error', err => console.error('Discord error:', err));
+discordClient.login(DISCORD_TOKEN).catch(err => {
+  console.error('Failed to login:', err.message);
+});
+
+// Schedulers
+const scheduledTasks = new Map();
+
+function loadSchedules() {
+  try {
+    const files = fs.readdirSync(schedulesDir);
+    files.forEach(file => {
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(schedulesDir, file), 'utf8'));
+        const schedTime = new Date(data.scheduledTime);
+        if (schedTime > new Date()) {
+          schedulePost(data);
+        } else {
+          fs.unlinkSync(path.join(schedulesDir, file));
+        }
+      } catch (err) {
+        console.error(`Error loading ${file}:`, err.message);
+      }
+    });
+  } catch (err) {
+    console.error('Error loading schedules:', err.message);
+  }
+}
+
+function schedulePost(data) {
+  const taskId = data.id;
+  const schedTime = new Date(data.scheduledTime);
+  const cronExpression = `${schedTime.getSeconds()} ${schedTime.getMinutes()} ${schedTime.getHours()} ${schedTime.getDate()} ${schedTime.getMonth() + 1} *`;
+  
+  try {
+    const task = cron.schedule(cronExpression, async () => {
+      try {
+        await sendPostToDiscord(data.channelId, data.title, data.files);
+        task.stop();
+        scheduledTasks.delete(taskId);
+        fs.unlinkSync(path.join(schedulesDir, `${taskId}.json`));
+        data.files.forEach(f => {
+          try { fs.unlinkSync(f); } catch (e) {}
+        });
+        console.log(`✓ Post executed: ${taskId}`);
+      } catch (err) {
+        console.error(`Error executing ${taskId}:`, err.message);
+      }
+    });
+    scheduledTasks.set(taskId, task);
+  } catch (err) {
+    console.error(`Error scheduling ${taskId}:`, err.message);
+  }
+}
+
+async function sendPostToDiscord(channelId, title, filePaths) {
+  const channel = await discordClient.channels.fetch(channelId);
+  if (!channel || !channel.isSendable?.()) {
+    throw new Error('Channel not sendable');
+  }
+  
+  const attachments = filePaths.filter(f => fs.existsSync(f));
+  if (attachments.length === 0) {
+    await channel.send(title || 'Empty post');
+  } else {
+    await channel.send({ content: title || '', files: attachments });
+  }
+}
+
+// Auth
+function authMiddleware(req, res, next) {
+  const pwd = req.headers['x-dashboard-pwd'] || req.query.pwd;
+  if (!pwd || pwd !== DASHBOARD_PASSWORD) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+// Serve HTML
+app.get('/', (req, res) => {
+  res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Discord Media Poster</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
-      padding: 20px;
-    }
-    
-    .page {
-      display: none;
-    }
-    
-    .page.active {
-      display: block;
-    }
-    
-    .tabs {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-      justify-content: center;
-    }
-    
-    .tab-btn {
-      padding: 12px 24px;
-      font-size: 14px;
-      font-weight: 600;
-      border: 2px solid white;
-      background: rgba(255, 255, 255, 0.2);
-      color: white;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.3s;
-    }
-    
-    .tab-btn.active {
-      background: white;
-      color: #667eea;
-    }
-    
-    .tab-btn:hover {
-      transform: translateY(-2px);
-    }
-    
-    .container {
-      width: 100%;
-      max-width: 700px;
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-      overflow: hidden;
-      margin: 0 auto;
-    }
-    
-    .header {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 30px 20px;
-      text-align: center;
-    }
-    
-    .header h1 {
-      font-size: 24px;
-      margin-bottom: 5px;
-    }
-    
-    .header p {
-      opacity: 0.9;
-      font-size: 14px;
-    }
-    
-    .form-section {
-      padding: 30px 20px;
-    }
-    
-    .form-group {
-      margin-bottom: 20px;
-    }
-    
-    label {
-      display: block;
-      margin-bottom: 8px;
-      font-weight: 600;
-      color: #333;
-      font-size: 14px;
-    }
-    
-    input[type="text"],
-    input[type="date"],
-    input[type="time"],
-    input[type="password"],
-    select {
-      width: 100%;
-      padding: 12px;
-      border: 2px solid #e0e0e0;
-      border-radius: 6px;
-      font-size: 14px;
-      font-family: inherit;
-      transition: border-color 0.3s;
-    }
-    
-    input[type="text"]:focus,
-    input[type="date"]:focus,
-    input[type="time"]:focus,
-    input[type="password"]:focus,
-    select:focus {
-      outline: none;
-      border-color: #667eea;
-      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-    
-    .file-upload {
-      position: relative;
-      border: 2px dashed #667eea;
-      border-radius: 6px;
-      padding: 30px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.3s;
-      background: #f8f9ff;
-    }
-    
-    .file-upload:hover {
-      border-color: #764ba2;
-      background: #f0f2ff;
-    }
-    
-    .file-upload input[type="file"] {
-      display: none;
-    }
-    
-    .file-upload-text {
-      color: #667eea;
-      font-weight: 600;
-      margin-bottom: 5px;
-    }
-    
-    .file-upload-subtext {
-      color: #999;
-      font-size: 12px;
-    }
-    
-    .file-list {
-      margin-top: 15px;
-      max-height: 200px;
-      overflow-y: auto;
-    }
-    
-    .file-item {
-      background: #f5f5f5;
-      padding: 8px 12px;
-      border-radius: 4px;
-      margin-bottom: 8px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 13px;
-    }
-    
-    .file-item button {
-      background: #ff4444;
-      color: white;
-      border: none;
-      padding: 4px 8px;
-      border-radius: 3px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    
-    .file-item button:hover {
-      background: #cc0000;
-    }
-    
-    .button-group {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-top: 25px;
-    }
-    
-    button {
-      padding: 12px 20px;
-      font-size: 14px;
-      font-weight: 600;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.3s;
-    }
-    
-    .btn-send {
-      background: #667eea;
-      color: white;
-      grid-column: 1;
-    }
-    
-    .btn-send:hover:not(:disabled) {
-      background: #5568d3;
-      transform: translateY(-2px);
-      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-    }
-    
-    .btn-schedule {
-      background: #764ba2;
-      color: white;
-      grid-column: 2;
-    }
-    
-    .btn-schedule:hover:not(:disabled) {
-      background: #654a8c;
-      transform: translateY(-2px);
-      box-shadow: 0 5px 15px rgba(118, 75, 162, 0.4);
-    }
-    
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    
-    .schedule-fields {
-      display: none;
-      padding: 15px;
-      background: #f8f9ff;
-      border-radius: 6px;
-      margin-top: 15px;
-      margin-bottom: 15px;
-    }
-    
-    .schedule-fields.show {
-      display: block;
-    }
-    
-    .schedule-fields .form-group {
-      margin-bottom: 12px;
-    }
-    
-    .message {
-      padding: 15px;
-      border-radius: 6px;
-      margin-bottom: 20px;
-      display: none;
-      font-size: 14px;
-      animation: slideIn 0.3s ease;
-    }
-    
-    .message.show {
-      display: block;
-    }
-    
-    .message.success {
-      background: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
-    }
-    
-    .message.error {
-      background: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
-    }
-    
-    .message.info {
-      background: #d1ecf1;
-      color: #0c5460;
-      border: 1px solid #bee5eb;
-    }
-    
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(-10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-    
-    /* Schedules Page Styles */
-    .schedules-list {
-      max-height: 600px;
-      overflow-y: auto;
-    }
-    
-    .schedule-card {
-      background: #f8f9ff;
-      border: 2px solid #e0e0e0;
-      border-radius: 8px;
-      padding: 15px;
-      margin-bottom: 15px;
-      transition: all 0.3s;
-    }
-    
-    .schedule-card:hover {
-      border-color: #667eea;
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
-    }
-    
-    .schedule-card.editing {
-      border-color: #667eea;
-      background: #fff;
-    }
-    
-    .schedule-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: start;
-      margin-bottom: 12px;
-    }
-    
-    .schedule-title {
-      font-weight: 600;
-      color: #333;
-      margin: 0;
-      word-break: break-word;
-    }
-    
-    .schedule-time {
-      color: #666;
-      font-size: 12px;
-      margin-top: 4px;
-    }
-    
-    .schedule-channel {
-      color: #667eea;
-      font-size: 13px;
-      margin-top: 4px;
-    }
-    
-    .schedule-files {
-      margin-top: 12px;
-      padding: 10px;
-      background: white;
-      border-radius: 4px;
-      max-height: 150px;
-      overflow-y: auto;
-      font-size: 12px;
-    }
-    
-    .schedule-file {
-      padding: 6px 0;
-      border-bottom: 1px solid #eee;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    
-    .schedule-file:last-child {
-      border-bottom: none;
-    }
-    
-    .schedule-actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 8px;
-      margin-top: 12px;
-    }
-    
-    .btn-edit, .btn-cancel, .btn-delete, .btn-save {
-      padding: 8px 12px;
-      font-size: 12px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    
-    .btn-edit {
-      background: #667eea;
-      color: white;
-    }
-    
-    .btn-edit:hover {
-      background: #5568d3;
-    }
-    
-    .btn-delete {
-      background: #ff4444;
-      color: white;
-    }
-    
-    .btn-delete:hover {
-      background: #cc0000;
-    }
-    
-    .btn-save {
-      background: #28a745;
-      color: white;
-      grid-column: 1 / 3;
-    }
-    
-    .btn-save:hover {
-      background: #218838;
-    }
-    
-    .btn-cancel {
-      background: #999;
-      color: white;
-    }
-    
-    .btn-cancel:hover {
-      background: #777;
-    }
-    
-    .edit-fields {
-      display: none;
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid #ddd;
-    }
-    
-    .edit-fields.show {
-      display: block;
-    }
-    
-    .edit-fields input {
-      margin-bottom: 10px;
-    }
-    
-    .empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: #999;
-    }
-    
-    .empty-state p {
-      font-size: 16px;
-      margin-bottom: 10px;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+    .top-bar { display: flex; justify-content: center; align-items: center; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+    .active-users { background: rgba(255, 255, 255, 0.95); padding: 10px 20px; border-radius: 20px; font-size: 14px; font-weight: 600; color: #667eea; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); }
+    .active-users span { display: inline-block; width: 24px; height: 24px; background: #28a745; border-radius: 50%; text-align: center; line-height: 24px; color: white; font-weight: bold; margin-right: 8px; }
+    .tabs { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+    .tab-btn { padding: 12px 24px; font-size: 14px; font-weight: 600; border: 2px solid white; background: rgba(255, 255, 255, 0.2); color: white; border-radius: 6px; cursor: pointer; transition: all 0.3s; }
+    .tab-btn.active { background: white; color: #667eea; }
+    .tab-btn:hover { transform: translateY(-2px); }
+    .page { display: none; }
+    .page.active { display: block; }
+    .container { width: 100%; max-width: 800px; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); overflow: hidden; margin: 0 auto; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px 20px; text-align: center; }
+    .header h1 { font-size: 24px; margin-bottom: 5px; }
+    .header p { opacity: 0.9; font-size: 14px; }
+    .form-section { padding: 30px 20px; max-height: 70vh; overflow-y: auto; }
+    .form-group { margin-bottom: 20px; }
+    label { display: block; margin-bottom: 8px; font-weight: 600; color: #333; font-size: 14px; }
+    input[type="text"], input[type="date"], input[type="time"], input[type="password"], select { width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px; font-family: inherit; transition: border-color 0.3s; }
+    input:focus, select:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
+    .file-upload { border: 2px dashed #667eea; border-radius: 6px; padding: 30px; text-align: center; cursor: pointer; background: #f8f9ff; transition: all 0.3s; }
+    .file-upload:hover { border-color: #764ba2; background: #f0f2ff; }
+    .file-upload input { display: none; }
+    .file-list { margin-top: 15px; max-height: 150px; overflow-y: auto; }
+    .file-item { background: #f5f5f5; padding: 8px 12px; border-radius: 4px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+    .file-item button { background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px; }
+    .file-item button:hover { background: #cc0000; }
+    .button-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 25px; }
+    button { padding: 12px 20px; font-size: 14px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; transition: all 0.3s; }
+    .btn-send { background: #667eea; color: white; }
+    .btn-send:hover:not(:disabled) { background: #5568d3; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4); }
+    .btn-schedule { background: #764ba2; color: white; }
+    .btn-schedule:hover:not(:disabled) { background: #654a8c; transform: translateY(-2px); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .schedule-fields { display: none; padding: 15px; background: #f8f9ff; border-radius: 6px; margin: 15px 0; }
+    .schedule-fields.show { display: block; }
+    .message { padding: 15px; border-radius: 6px; margin-bottom: 20px; display: none; font-size: 14px; animation: slideIn 0.3s ease; }
+    .message.show { display: block; }
+    .message.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .message.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .message.info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    .schedule-card { background: #f8f9ff; border: 2px solid #e0e0e0; border-radius: 8px; padding: 15px; margin-bottom: 15px; transition: all 0.3s; }
+    .schedule-card:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2); }
+    .schedule-card.editing { border-color: #667eea; background: #fff; }
+    .schedule-title { font-weight: 600; color: #333; margin: 0 0 4px 0; }
+    .schedule-time { color: #666; font-size: 12px; }
+    .schedule-files { margin-top: 10px; padding: 8px; background: white; border-radius: 4px; font-size: 12px; max-height: 100px; overflow-y: auto; }
+    .schedule-file { padding: 4px 0; border-bottom: 1px solid #eee; }
+    .schedule-file:last-child { border-bottom: none; }
+    .schedule-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .btn-small { padding: 8px 12px; font-size: 12px; border-radius: 4px; }
+    .btn-edit { background: #667eea; color: white; }
+    .btn-delete { background: #ff4444; color: white; }
+    .btn-save { background: #28a745; color: white; grid-column: 1 / 3; }
+    .btn-cancel { background: #999; color: white; }
+    .edit-fields { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd; }
+    .edit-fields.show { display: block; }
+    .empty-state { text-align: center; padding: 40px 20px; color: #999; }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
   </style>
 </head>
 <body>
+  <div class="top-bar">
+    <div class="active-users">
+      <span id="userCount">0</span>
+      Active Users
+    </div>
+  </div>
+
   <div class="tabs">
     <button class="tab-btn active" onclick="switchPage('create')">📤 Create Post</button>
-    <button class="tab-btn" onclick="switchPage('schedules')">📅 Active Schedules</button>
+    <button class="tab-btn" onclick="switchPage('schedules')">📅 Scheduled Posts</button>
   </div>
 
   <div class="container">
@@ -494,39 +222,33 @@ const dashboardHTML = `<!DOCTYPE html>
       <p>Post images & videos to Discord channels</p>
     </div>
     
-    <!-- CREATE POST PAGE -->
     <div id="create" class="page active">
       <div class="form-section">
         <div id="message" class="message"></div>
-        
         <form id="mediaForm">
           <div class="form-group">
             <label>Dashboard Password</label>
             <input type="password" id="password" placeholder="Enter dashboard password">
           </div>
-          
           <div class="form-group">
             <label>Discord Channel</label>
             <select id="channel" required>
               <option value="">Loading channels...</option>
             </select>
           </div>
-          
           <div class="form-group">
             <label>Post Title (Optional)</label>
             <input type="text" id="title" placeholder="What's this post about?">
           </div>
-          
           <div class="form-group">
             <label>Upload Media Files</label>
             <div class="file-upload" id="fileUpload">
-              <div class="file-upload-text">Click or drag files here</div>
-              <div class="file-upload-subtext">Supported: PNG, JPG, GIF, MP4, MOV, WebM (up to 25MB each)</div>
+              <div>Click or drag files here</div>
+              <div style="color: #999; font-size: 12px; margin-top: 5px;">PNG, JPG, GIF, MP4, MOV (up to 25MB each)</div>
               <input type="file" id="fileInput" multiple accept="image/*,video/*">
             </div>
             <div class="file-list" id="fileList"></div>
           </div>
-          
           <div class="schedule-fields" id="scheduleFields">
             <div class="form-group">
               <label>Date</label>
@@ -537,7 +259,6 @@ const dashboardHTML = `<!DOCTYPE html>
               <input type="time" id="scheduleTime">
             </div>
           </div>
-          
           <div class="button-group">
             <button type="button" class="btn-send" id="sendNowBtn">📤 Send Now</button>
             <button type="button" class="btn-schedule" id="scheduleBtn">⏰ Schedule</button>
@@ -546,15 +267,13 @@ const dashboardHTML = `<!DOCTYPE html>
       </div>
     </div>
     
-    <!-- SCHEDULES PAGE -->
     <div id="schedules" class="page">
       <div class="form-section">
         <div id="schedulesMessage" class="message"></div>
-        <h2 style="margin-bottom: 20px; color: #333;">📅 Active Scheduled Posts</h2>
-        <div class="schedules-list" id="schedulesList"></div>
+        <h2 style="margin-bottom: 20px; color: #333;">📅 All Scheduled Posts</h2>
+        <div id="schedulesList"></div>
         <div id="emptySchedules" class="empty-state">
           <p>No scheduled posts yet</p>
-          <p style="font-size: 12px;">Create a scheduled post to see it here</p>
         </div>
       </div>
     </div>
@@ -562,56 +281,35 @@ const dashboardHTML = `<!DOCTYPE html>
   
   <script>
     const API_URL = window.location.origin;
-    
     let selectedFiles = [];
     let isScheduling = false;
     let allSchedules = [];
     let currentPassword = '';
     
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlPassword = urlParams.get('pwd');
-    if (urlPassword) {
-      document.getElementById('password').value = urlPassword;
-      currentPassword = urlPassword;
+    function updateActiveUsers() {
+      fetch(API_URL + '/api/active-users').then(r => r.json()).then(d => {
+        document.getElementById('userCount').textContent = d.count;
+      }).catch(e => console.log('User count error'));
     }
     
-    // Tab switching
+    updateActiveUsers();
+    setInterval(updateActiveUsers, 5000);
+    
     function switchPage(page) {
       document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.getElementById(page).classList.add('active');
       event.target.classList.add('active');
-      
-      if (page === 'schedules') {
-        loadSchedules();
-      }
+      if (page === 'schedules') loadSchedules();
     }
     
-    // File upload handling
     const fileUpload = document.getElementById('fileUpload');
     const fileInput = document.getElementById('fileInput');
-    const fileList = document.getElementById('fileList');
     
     fileUpload.addEventListener('click', () => fileInput.click());
-    
-    fileUpload.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      fileUpload.style.borderColor = '#764ba2';
-      fileUpload.style.background = '#efe5ff';
-    });
-    
-    fileUpload.addEventListener('dragleave', () => {
-      fileUpload.style.borderColor = '#667eea';
-      fileUpload.style.background = '#f8f9ff';
-    });
-    
-    fileUpload.addEventListener('drop', (e) => {
-      e.preventDefault();
-      fileUpload.style.borderColor = '#667eea';
-      fileUpload.style.background = '#f8f9ff';
-      handleFiles(e.dataTransfer.files);
-    });
-    
+    fileUpload.addEventListener('dragover', (e) => { e.preventDefault(); fileUpload.style.borderColor = '#764ba2'; });
+    fileUpload.addEventListener('dragleave', () => { fileUpload.style.borderColor = '#667eea'; });
+    fileUpload.addEventListener('drop', (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); });
     fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
     
     function handleFiles(files) {
@@ -624,12 +322,9 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     
     function renderFileList() {
-      fileList.innerHTML = selectedFiles.map((file, idx) => \`
-        <div class="file-item">
-          <span>\${file.name} (\${(file.size / 1024 / 1024).toFixed(2)}MB)</span>
-          <button type="button" onclick="removeFile(\${idx})">Remove</button>
-        </div>
-      \`).join('');
+      document.getElementById('fileList').innerHTML = selectedFiles.map((file, idx) => 
+        '<div class="file-item"><span>' + file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + 'MB)</span><button type="button" onclick="removeFile(' + idx + ')">Remove</button></div>'
+      ).join('');
     }
     
     function removeFile(idx) {
@@ -646,27 +341,14 @@ const dashboardHTML = `<!DOCTYPE html>
       }
       
       try {
-        const res = await fetch(\`\${API_URL}/api/channels\`, {
-          headers: { 'x-dashboard-pwd': pwd }
-        });
-        
-        if (res.status === 401) {
-          showMessage('Invalid password', 'error');
-          return;
-        }
-        
+        const res = await fetch(API_URL + '/api/channels', { headers: { 'x-dashboard-pwd': pwd } });
+        if (res.status === 401) { showMessage('Invalid password', 'error'); return; }
         if (!res.ok) throw new Error(await res.text());
         
         const channels = await res.json();
         const select = document.getElementById('channel');
-        
-        if (channels.length === 0) {
-          select.innerHTML = '<option value="">No channels found. Check bot permissions.</option>';
-          return;
-        }
-        
         select.innerHTML = '<option value="">Select a channel...</option>' + channels.map(ch => 
-          \`<option value="\${ch.id}">\${ch.guild} - \${ch.name}</option>\`
+          '<option value="' + ch.id + '">' + ch.guild + ' - ' + ch.name + '</option>'
         ).join('');
       } catch (err) {
         showMessage('Failed to load channels: ' + err.message, 'error');
@@ -677,18 +359,12 @@ const dashboardHTML = `<!DOCTYPE html>
     
     document.getElementById('scheduleBtn').addEventListener('click', (e) => {
       e.preventDefault();
-      if (isScheduling) {
-        isScheduling = false;
-        document.getElementById('scheduleFields').classList.remove('show');
-      } else {
-        isScheduling = true;
-        document.getElementById('scheduleFields').classList.add('show');
-      }
+      isScheduling = !isScheduling;
+      document.getElementById('scheduleFields').classList.toggle('show');
     });
     
     document.getElementById('sendNowBtn').addEventListener('click', async (e) => {
       e.preventDefault();
-      
       const pwd = document.getElementById('password').value;
       const channelId = document.getElementById('channel').value;
       const title = document.getElementById('title').value;
@@ -705,7 +381,7 @@ const dashboardHTML = `<!DOCTYPE html>
         const formData = new FormData();
         selectedFiles.forEach(file => formData.append('files', file));
         
-        const uploadRes = await fetch(\`\${API_URL}/api/upload\`, {
+        const uploadRes = await fetch(API_URL + '/api/upload', {
           method: 'POST',
           headers: { 'x-dashboard-pwd': pwd },
           body: formData
@@ -716,22 +392,15 @@ const dashboardHTML = `<!DOCTYPE html>
         
         showMessage('Sending to Discord...', 'info');
         
-        const sendRes = await fetch(\`\${API_URL}/api/send-now\`, {
+        const sendRes = await fetch(API_URL + '/api/send-now', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-dashboard-pwd': pwd
-          },
-          body: JSON.stringify({
-            channelId,
-            title,
-            files: uploadData.files
-          })
+          headers: { 'Content-Type': 'application/json', 'x-dashboard-pwd': pwd },
+          body: JSON.stringify({ channelId, title, files: uploadData.files })
         });
         
         if (!sendRes.ok) throw new Error(await sendRes.text());
         
-        showMessage('✓ Post sent successfully!', 'success');
+        showMessage('Post sent successfully!', 'success');
         selectedFiles = [];
         renderFileList();
         document.getElementById('mediaForm').reset();
@@ -744,7 +413,6 @@ const dashboardHTML = `<!DOCTYPE html>
     
     document.getElementById('scheduleBtn').addEventListener('click', async (e) => {
       if (isScheduling) return;
-      
       e.preventDefault();
       
       const pwd = document.getElementById('password').value;
@@ -765,7 +433,7 @@ const dashboardHTML = `<!DOCTYPE html>
         const formData = new FormData();
         selectedFiles.forEach(file => formData.append('files', file));
         
-        const uploadRes = await fetch(\`\${API_URL}/api/upload\`, {
+        const uploadRes = await fetch(API_URL + '/api/upload', {
           method: 'POST',
           headers: { 'x-dashboard-pwd': pwd },
           body: formData
@@ -776,29 +444,20 @@ const dashboardHTML = `<!DOCTYPE html>
         
         showMessage('Scheduling post...', 'info');
         
-        const schedRes = await fetch(\`\${API_URL}/api/schedule\`, {
+        const schedRes = await fetch(API_URL + '/api/schedule', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-dashboard-pwd': pwd
-          },
-          body: JSON.stringify({
-            channelId,
-            title,
-            files: uploadData.files,
-            scheduledTime: new Date(\`\${date}T\${time}\`).toISOString()
-          })
+          headers: { 'Content-Type': 'application/json', 'x-dashboard-pwd': pwd },
+          body: JSON.stringify({ channelId, title, files: uploadData.files, scheduledTime: new Date(date + 'T' + time).toISOString() })
         });
         
         if (!schedRes.ok) throw new Error(await schedRes.text());
         
-        showMessage('✓ Post scheduled successfully!', 'success');
+        showMessage('Post scheduled successfully!', 'success');
         selectedFiles = [];
         renderFileList();
         document.getElementById('mediaForm').reset();
         document.getElementById('scheduleFields').classList.remove('show');
         isScheduling = false;
-        
         setTimeout(() => loadSchedules(), 1000);
       } catch (err) {
         showMessage('Error: ' + err.message, 'error');
@@ -808,16 +467,10 @@ const dashboardHTML = `<!DOCTYPE html>
     });
     
     async function loadSchedules() {
-      if (!currentPassword) {
-        showSchedulesMessage('Please enter password first', 'info');
-        return;
-      }
+      if (!currentPassword) { showSchedulesMessage('Please enter password first', 'info'); return; }
       
       try {
-        const res = await fetch(\`\${API_URL}/api/schedules\`, {
-          headers: { 'x-dashboard-pwd': currentPassword }
-        });
-        
+        const res = await fetch(API_URL + '/api/schedules', { headers: { 'x-dashboard-pwd': currentPassword } });
         if (!res.ok) throw new Error('Failed to load schedules');
         
         allSchedules = await res.json();
@@ -838,42 +491,18 @@ const dashboardHTML = `<!DOCTYPE html>
       }
       
       empty.style.display = 'none';
-      list.innerHTML = allSchedules.map(sched => \`
-        <div class="schedule-card" id="card-\${sched.id}">
-          <div class="schedule-header">
-            <div>
-              <h3 class="schedule-title" id="title-\${sched.id}">\${sched.title || 'Untitled'}</h3>
-              <div class="schedule-time">⏰ \${new Date(sched.scheduledTime).toLocaleString()}</div>
-              <div class="schedule-channel">📍 Channel ID: \${sched.channelId}</div>
-            </div>
-          </div>
-          
-          <div class="schedule-files" id="files-\${sched.id}">
-            \${sched.files.map(f => \`<div class="schedule-file"><span>\${f.split('/').pop()}</span></div>\`).join('')}
-          </div>
-          
-          <div class="edit-fields" id="edit-\${sched.id}">
-            <label>New Title</label>
-            <input type="text" class="edit-title" value="\${sched.title || ''}" placeholder="Update title">
-          </div>
-          
-          <div class="schedule-actions">
-            <button class="btn-edit" onclick="editSchedule('\${sched.id}')">✏️ Edit</button>
-            <button class="btn-cancel" onclick="cancelEdit('\${sched.id}')" style="display:none;" id="cancel-\${sched.id}">Cancel</button>
-            <button class="btn-save" onclick="saveSchedule('\${sched.id}')" style="display:none;" id="save-\${sched.id}">💾 Save</button>
-            <button class="btn-delete" onclick="deleteSchedule('\${sched.id}')">🗑️ Delete</button>
-          </div>
-        </div>
-      \`).join('');
+      list.innerHTML = allSchedules.map(sched => {
+        const time = new Date(sched.scheduledTime).toLocaleString();
+        return '<div class="schedule-card" id="card-' + sched.id + '"><h3 class="schedule-title" id="title-' + sched.id + '">' + (sched.title || 'Untitled') + '</h3><div class="schedule-time">⏰ ' + time + '</div><div class="schedule-files">' + sched.files.map(f => '<div class="schedule-file">📄 ' + f.split('/').pop() + '</div>').join('') + '</div><div class="edit-fields" id="edit-' + sched.id + '"><label>New Title</label><input type="text" class="edit-title" value="' + (sched.title || '') + '" placeholder="Update title"></div><div class="schedule-actions"><button class="btn-small btn-edit" onclick="editSchedule(\'' + sched.id + '\')">✏️ Edit</button><button class="btn-small btn-cancel" onclick="cancelEdit(\'' + sched.id + '\')" style="display:none;" id="cancel-' + sched.id + '">Cancel</button><button class="btn-small btn-save" onclick="saveSchedule(\'' + sched.id + '\')" style="display:none;" id="save-' + sched.id + '">💾 Save</button><button class="btn-small btn-delete" onclick="deleteSchedule(\'' + sched.id + '\')">🗑️ Delete</button></div></div>';
+      }).join('');
     }
     
     function editSchedule(id) {
-      const card = document.getElementById(\`card-\${id}\`);
-      const editFields = document.getElementById(\`edit-\${id}\`);
+      const card = document.getElementById('card-' + id);
       const editBtn = card.querySelector('.btn-edit');
-      const saveBtn = document.getElementById(\`save-\${id}\`);
-      const cancelBtn = document.getElementById(\`cancel-\${id}\`);
-      
+      const saveBtn = document.getElementById('save-' + id);
+      const cancelBtn = document.getElementById('cancel-' + id);
+      const editFields = document.getElementById('edit-' + id);
       card.classList.add('editing');
       editFields.classList.add('show');
       editBtn.style.display = 'none';
@@ -882,12 +511,11 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     
     function cancelEdit(id) {
-      const card = document.getElementById(\`card-\${id}\`);
-      const editFields = document.getElementById(\`edit-\${id}\`);
+      const card = document.getElementById('card-' + id);
       const editBtn = card.querySelector('.btn-edit');
-      const saveBtn = document.getElementById(\`save-\${id}\`);
-      const cancelBtn = document.getElementById(\`cancel-\${id}\`);
-      
+      const saveBtn = document.getElementById('save-' + id);
+      const cancelBtn = document.getElementById('cancel-' + id);
+      const editFields = document.getElementById('edit-' + id);
       card.classList.remove('editing');
       editFields.classList.remove('show');
       editBtn.style.display = 'block';
@@ -896,20 +524,190 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     
     async function saveSchedule(id) {
-      const newTitle = document.querySelector(\`#edit-\${id} .edit-title\`).value;
-      
+      const newTitle = document.querySelector('#edit-' + id + ' .edit-title').value;
       try {
-        const res = await fetch(\`\${API_URL}/api/schedule/\${id}\`, {
+        const res = await fetch(API_URL + '/api/schedule/' + id, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-dashboard-pwd': currentPassword
-          },
+          headers: { 'Content-Type': 'application/json', 'x-dashboard-pwd': currentPassword },
           body: JSON.stringify({ title: newTitle })
         });
-        
         if (!res.ok) throw new Error('Failed to save');
-        
         const idx = allSchedules.findIndex(s => s.id === id);
-        if (idx !== -1) {
-          allSchedul
+        if (idx !== -1) allSchedules[idx].title = newTitle;
+        cancelEdit(id);
+        document.getElementById('title-' + id).textContent = newTitle || 'Untitled';
+        showSchedulesMessage('Schedule updated!', 'success');
+      } catch (err) {
+        showSchedulesMessage('Error: ' + err.message, 'error');
+      }
+    }
+    
+    async function deleteSchedule(id) {
+      if (!confirm('Delete this scheduled post?')) return;
+      try {
+        const res = await fetch(API_URL + '/api/schedule/' + id, {
+          method: 'DELETE',
+          headers: { 'x-dashboard-pwd': currentPassword }
+        });
+        if (!res.ok) throw new Error('Failed to delete');
+        allSchedules = allSchedules.filter(s => s.id !== id);
+        renderSchedules();
+        showSchedulesMessage('Schedule deleted!', 'success');
+      } catch (err) {
+        showSchedulesMessage('Error: ' + err.message, 'error');
+      }
+    }
+    
+    function showMessage(text, type) {
+      const msg = document.getElementById('message');
+      msg.textContent = text;
+      msg.className = 'message show ' + type;
+      if (type === 'success' || type === 'error') setTimeout(() => msg.classList.remove('show'), 5000);
+    }
+  </script>
+</body>
+</html>`);
+});
+
+// API Endpoints
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', bot: discordClient.readyAt ? 'ready' : 'connecting' });
+});
+
+app.get('/api/active-users', (req, res) => {
+  res.json({ count: activeUsers.size });
+});
+
+app.get('/api/channels', authMiddleware, async (req, res) => {
+  try {
+    if (!discordClient.readyAt) {
+      return res.status(503).json({ error: 'Discord bot not ready yet' });
+    }
+    
+    const channels = [];
+    for (const guild of discordClient.guilds.cache.values()) {
+      for (const channel of guild.channels.cache.values()) {
+        if (channel.isSendable?.() && (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement)) {
+          channels.push({ id: channel.id, name: `#${channel.name}`, guild: guild.name });
+        }
+      }
+    }
+    res.json(channels);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/schedules', authMiddleware, (req, res) => {
+  try {
+    const files = fs.readdirSync(schedulesDir);
+    const schedules = files.map(file => JSON.parse(fs.readFileSync(path.join(schedulesDir, file), 'utf8')));
+    res.json(schedules);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/upload', authMiddleware, upload.array('files', 10), (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'No files uploaded' });
+  }
+  const filePaths = req.files.map(f => path.join(uploadsDir, f.filename));
+  res.json({ files: filePaths, count: filePaths.length });
+});
+
+app.post('/api/send-now', authMiddleware, async (req, res) => {
+  const { channelId, title, files } = req.body;
+  if (!channelId || !files || files.length === 0) {
+    return res.status(400).json({ error: 'Missing channelId or files' });
+  }
+  
+  try {
+    await sendPostToDiscord(channelId, title, files);
+    files.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
+    res.json({ success: true, message: 'Post sent!' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/schedule', authMiddleware, (req, res) => {
+  const { channelId, title, files, scheduledTime } = req.body;
+  if (!channelId || !files || !scheduledTime) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  
+  const schedTime = new Date(scheduledTime);
+  if (schedTime <= new Date()) {
+    return res.status(400).json({ error: 'Scheduled time must be in the future' });
+  }
+  
+  const taskId = `task-${Date.now()}`;
+  const schedData = { id: taskId, channelId, title, files, scheduledTime };
+  
+  try {
+    fs.writeFileSync(path.join(schedulesDir, `${taskId}.json`), JSON.stringify(schedData));
+    schedulePost(schedData);
+    res.json({ success: true, taskId, message: 'Post scheduled!' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/schedule/:id', authMiddleware, (req, res) => {
+  const { id } = req.params;
+  const { title } = req.body;
+  
+  try {
+    const filePath = path.join(schedulesDir, `${id}.json`);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+    
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    data.title = title;
+    fs.writeFileSync(filePath, JSON.stringify(data));
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/schedule/:id', authMiddleware, (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    const filePath = path.join(schedulesDir, `${id}.json`);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+    
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    
+    if (scheduledTasks.has(id)) {
+      scheduledTasks.get(id).stop();
+      scheduledTasks.delete(id);
+    }
+    
+    data.files.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
+    fs.unlinkSync(filePath);
+    
+    res.json({ success: true, message: 'Schedule deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`\n✓ Server running on port ${PORT}`);
+  console.log(`✓ Dashboard: http://localhost:${PORT}\n`);
+  setTimeout(() => loadSchedules(), 3000);
+});'error') setTimeout(() => msg.classList.remove('show'), 5000);
+    }
+    
+    function showSchedulesMessage(text, type) {
+      const msg = document.getElementById('schedulesMessage');
+      msg.textContent = text;
+      msg.className = 'message show ' + type;
+      if (type === 'success' || type ===
