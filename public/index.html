@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Discord Video Sender</title>
+
+  <!-- FIX CSP -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self';
+                 script-src 'self';
+                 style-src 'self';
+                 connect-src 'self';">
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: white;
+      margin: 0;
+      padding: 20px;
+    }
+
+    button {
+      padding: 10px 15px;
+      margin: 5px;
+      cursor: pointer;
+    }
+
+    .page {
+      display: none;
+      margin-top: 20px;
+    }
+
+    .page.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🎬 Discord Video Sender</h1>
+
+  <button onclick="switchPage('upload')">Upload</button>
+  <button onclick="switchPage('schedule')">Schedule</button>
+
+  <div id="upload" class="page active">
+    <h2>Upload Videos</h2>
+    <form id="uploadForm">
+      <input type="file" name="videos" multiple />
+      <br><br>
+      <button type="submit">Send</button>
+    </form>
+    <pre id="uploadResult"></pre>
+  </div>
+
+  <div id="schedule" class="page">
+    <h2>Schedule (coming soon)</h2>
+  </div>
+
+  <script>
+    function switchPage(page) {
+      document.querySelectorAll(".page").forEach(p => {
+        p.classList.remove("active");
+      });
+      document.getElementById(page).classList.add("active");
+    }
+
+    document.getElementById("uploadForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+
+      const res = await fetch("/upload", {
+        method: "POST",
+        body: formData
+      });
+
+      const data = await res.json();
+      document.getElementById("uploadResult").textContent =
+        JSON.stringify(data, null, 2);
+    });
+  </script>
+
+</body>
+</html>
