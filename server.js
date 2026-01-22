@@ -3,7 +3,7 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
-const { Client, GatewayIntentBits, ChannelType } = require('discord.js');
+const { Client, GatewayIntentBits, ChannelType, REST, Routes, SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const cors = require('cors');
 
 const app = express();
@@ -48,11 +48,188 @@ app.use((req, res, next) => {
 
 // Discord Bot
 const discordClient = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages]
 });
 
-discordClient.once('ready', () => {
+discordClient.once('ready', async () => {
   console.log(`✓ Discord bot logged in as ${discordClient.user.tag}`);
+  
+  // Register slash commands
+  const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+  
+  try {
+    const commands = [
+      new SlashCommandBuilder()
+        .setName('post')
+        .setDescription('Post media to a Discord channel')
+        .addChannelOption(option =>
+          option
+            .setName('channel')
+            .setDescription('Channel to post to')
+            .setRequired(true)
+        )
+    ];
+    
+    await rest.put(
+      Routes.applicationCommands(discordClient.user.id),
+      { body: commands.map(cmd => cmd.toJSON()) }
+    );
+    
+    console.log('✓ Slash commands registered');
+  } catch (error) {
+    console.error('Error registering slash commands:', error);
+  }
+});
+
+discordClient.on('interactionCreate', async (interaction) => {
+  if (interaction.isCommand() && interaction.commandName === 'post') {
+    const channel = interaction.options.getChannel('channel');
+    
+    if (!interaction.member.permissions.has('SEND_MESSAGES')) {
+      return interaction.reply({ content: 'You do not have permission', ephemeral: true });
+    }
+    
+    const modal = new ModalBuilder()
+      .setCustomId('postModal')
+      .setTitle('Post to ' + channel.name);
+    
+    const titleInput = new TextInputBuilder()
+      .setCustomId('titleInput')
+      .setLabel('Post Title (optional)')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setPlaceholder('What is this post about?');
+    
+    const dateInput = new TextInputBuilder()
+      .setCustomId('dateInput')
+      .setLabel('Schedule Date (YYYY-MM-DD or blank)')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false);
+    
+    const timeInput = new TextInputBuilder()
+      .setCustomId('timeInput')
+      .setLabel('Schedule Time (HH:MM or blank)')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false);
+    
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(titleInput),
+      new ActionRowBuilder().addComponents(dateInput),
+      new ActionRowBuilder().addComponents(timeInput)
+    );
+    
+    discordClient.tempPostData = discordClient.tempPostData || {};
+    discordClient.tempPostData[interaction.user.id] = {
+      channelId: channel.id,
+      channelName: channel.name,
+      userId: interaction.user.id
+    };
+    
+    await interaction.showModal(modal);
+  }
+  
+  if (interaction.isModalSubmit() && interaction.customId === 'postModal') {
+    const title = interaction.fields.getTextInputValue('titleInput') || '';
+    const schedDate = interaction.fields.getTextInputValue('dateInput') || '';
+    const schedTime = interaction.fields.getTextInputValue('timeInput') || '';
+    
+    const postData = discordClient.tempPostData?.[interaction.user.id];
+    if (!postData) {
+      return interaction.reply({ content: 'Error: Session expired', ephemeral: true });
+    }
+    
+    const embed = new EmbedBuilder()
+      .setColor('#667eea')
+      .setTitle('📤 Upload Media')
+      .setDescription(`**Channel:** <#${postData.channelId}>\n**Title:** ${title || '(none)'}\n\n📎 Attach files below then click Send or Schedule`)
+      .addFields({ name: '⏰ Schedule', value: schedDate && schedTime ? `${schedDate} at ${schedTime}` : 'Immediate post' });
+    
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('send_now_' + interaction.user.id).setLabel('📤 Send Now').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('schedule_post_' + interaction.user.id).setLabel('⏰ Schedule').setStyle(ButtonStyle.Secondary).setDisabled(!schedDate || !schedTime),
+      new ButtonBuilder().setCustomId('cancel_post_' + interaction.user.id).setLabel('❌ Cancel').setStyle(ButtonStyle.Danger)
+    );
+    
+    discordClient.tempPostData[interaction.user.id] = { ...postData, title, schedDate, schedTime };
+    
+    await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+  }
+  
+  if (interaction.isButton()) {
+    const buttonId = interaction.customId;
+    const userId = interaction.user.id;
+    
+    if (!buttonId.includes(userId)) return;
+    
+    const postData = discordClient.tempPostData?.[userId];
+    if (!postData) {
+      return interaction.reply({ content: 'Session expired', ephemeral: true });
+    }
+    
+    if (buttonId.startsWith('cancel_post_')) {
+      delete discordClient.tempPostData[userId];
+      return interaction.reply({ content: '❌ Cancelled', ephemeral: true });
+    }
+    
+    try {
+      await interaction.deferReply({ ephemeral: true });
+      
+      const message = interaction.message;
+      const attachments = Array.from(message.attachments.values());
+      
+      if (attachments.length === 0) {
+        return interaction.editReply({ content: '❌ No files attached' });
+      }
+      
+      if (buttonId.startsWith('send_now_')) {
+        const channel = discordClient.channels.cache.get(postData.channelId);
+        const files = [];
+        
+        for (const att of attachments) {
+          const response = await require('node-fetch').default(att.url);
+          const buffer = await response.buffer();
+          const filePath = path.join(uploadsDir, `${Date.now()}-${att.name}`);
+          fs.writeFileSync(filePath, buffer);
+          files.push(filePath);
+        }
+        
+        await channel.send({ content: postData.title || '', files });
+        files.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
+        delete discordClient.tempPostData[userId];
+        
+        interaction.editReply({ content: '✅ Posted!' });
+      }
+      
+      if (buttonId.startsWith('schedule_post_')) {
+        const { schedDate, schedTime, title, channelId } = postData;
+        if (!schedDate || !schedTime) {
+          return interaction.editReply({ content: '❌ Schedule date/time required' });
+        }
+        
+        const taskId = `task-${Date.now()}`;
+        const files = [];
+        
+        for (const att of attachments) {
+          const response = await require('node-fetch').default(att.url);
+          const buffer = await response.buffer();
+          const filePath = path.join(uploadsDir, `${Date.now()}-${att.name}`);
+          fs.writeFileSync(filePath, buffer);
+          files.push(filePath);
+        }
+        
+        const scheduledTime = new Date(`${schedDate}T${schedTime}`).toISOString();
+        const schedData = { id: taskId, channelId, title, files, scheduledTime };
+        
+        fs.writeFileSync(path.join(schedulesDir, `${taskId}.json`), JSON.stringify(schedData));
+        schedulePost(schedData);
+        
+        delete discordClient.tempPostData[userId];
+        interaction.editReply({ content: `✅ Scheduled for ${schedDate} at ${schedTime}` });
+      }
+    } catch (err) {
+      interaction.editReply({ content: '❌ Error: ' + err.message });
+    }
+  }
 });
 
 discordClient.on('error', err => console.error('Discord error:', err));
