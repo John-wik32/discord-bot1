@@ -1,36 +1,48 @@
-// server.js
 const express = require("express");
 const path = require("path");
 const { Client, GatewayIntentBits } = require("discord.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const TOKEN = process.env.DISCORD_TOKEN;
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "admin";
 
-// ===== EXPRESS =====
 const publicDir = path.join(__dirname, "public");
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(publicDir));
 
-// Serve dashboard
+// auth middleware
+app.use((req, res, next) => {
+  if (req.path === "/login") return next();
+  if (req.headers["x-dashboard-pass"] === DASHBOARD_PASSWORD) return next();
+  next();
+});
+
+// login endpoint
+app.post("/login", (req, res) => {
+  if (req.body.password === DASHBOARD_PASSWORD) {
+    return res.json({ success: true });
+  }
+  res.status(401).json({ success: false });
+});
+
+// serve site
 app.get("/", (req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
 
-// Health check (important for Koyeb)
-app.get("/health", (req, res) => {
-  res.status(200).send("OK");
-});
+// health check
+app.get("/health", (_, res) => res.send("OK"));
 
-// Start web server
 app.listen(PORT, () => {
-  console.log(`🌐 Web server running on port ${PORT}`);
+  console.log(`🌐 Dashboard running on ${PORT}`);
 });
 
 // ===== DISCORD BOT =====
-if (!DISCORD_TOKEN) {
-  console.error("❌ DISCORD_TOKEN not set");
+if (!TOKEN) {
+  console.error("❌ DISCORD_TOKEN missing");
   process.exit(1);
 }
 
@@ -39,7 +51,7 @@ const client = new Client({
 });
 
 client.once("ready", () => {
-  console.log(`🤖 Bot online as ${client.user.tag}`);
+  console.log(`🤖 Bot online: ${client.user.tag}`);
 });
 
-client.login(DISCORD_TOKEN);
+client.login(TOKEN);
