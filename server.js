@@ -3,6 +3,7 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
+const fetch = require('node-fetch');
 const { Client, GatewayIntentBits, ChannelType, REST, Routes, SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const cors = require('cors');
 
@@ -18,24 +19,20 @@ if (!DISCORD_TOKEN) {
   process.exit(1);
 }
 
-// Directories
 const uploadsDir = path.join(__dirname, 'uploads');
 const schedulesDir = path.join(__dirname, 'schedules');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 if (!fs.existsSync(schedulesDir)) fs.mkdirSync(schedulesDir, { recursive: true });
 
-// Storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
 const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 
-// Track active users
 let activeUsers = new Set();
 setInterval(() => { activeUsers.clear(); }, 30 * 60 * 1000);
 
-// Middleware
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
@@ -46,15 +43,17 @@ app.use((req, res, next) => {
   next();
 });
 
-// Discord Bot
+// Discord Bot Setup
 const discordClient = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages]
 });
 
+let isReady = false;
+
 discordClient.once('ready', async () => {
+  isReady = true;
   console.log(`✓ Discord bot logged in as ${discordClient.user.tag}`);
   
-  // Register slash commands
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
   
   try {
@@ -77,164 +76,183 @@ discordClient.once('ready', async () => {
     
     console.log('✓ Slash commands registered');
   } catch (error) {
-    console.error('Error registering slash commands:', error);
+    console.error('Error registering commands:', error);
   }
 });
 
 discordClient.on('interactionCreate', async (interaction) => {
-  if (interaction.isCommand() && interaction.commandName === 'post') {
-    const channel = interaction.options.getChannel('channel');
-    
-    if (!interaction.member.permissions.has('SEND_MESSAGES')) {
-      return interaction.reply({ content: 'You do not have permission', ephemeral: true });
-    }
-    
-    const modal = new ModalBuilder()
-      .setCustomId('postModal')
-      .setTitle('Post to ' + channel.name);
-    
-    const titleInput = new TextInputBuilder()
-      .setCustomId('titleInput')
-      .setLabel('Post Title (optional)')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(false)
-      .setPlaceholder('What is this post about?');
-    
-    const dateInput = new TextInputBuilder()
-      .setCustomId('dateInput')
-      .setLabel('Schedule Date (YYYY-MM-DD or blank)')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(false);
-    
-    const timeInput = new TextInputBuilder()
-      .setCustomId('timeInput')
-      .setLabel('Schedule Time (HH:MM or blank)')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(false);
-    
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(titleInput),
-      new ActionRowBuilder().addComponents(dateInput),
-      new ActionRowBuilder().addComponents(timeInput)
-    );
-    
-    discordClient.tempPostData = discordClient.tempPostData || {};
-    discordClient.tempPostData[interaction.user.id] = {
-      channelId: channel.id,
-      channelName: channel.name,
-      userId: interaction.user.id
-    };
-    
-    await interaction.showModal(modal);
-  }
-  
-  if (interaction.isModalSubmit() && interaction.customId === 'postModal') {
-    const title = interaction.fields.getTextInputValue('titleInput') || '';
-    const schedDate = interaction.fields.getTextInputValue('dateInput') || '';
-    const schedTime = interaction.fields.getTextInputValue('timeInput') || '';
-    
-    const postData = discordClient.tempPostData?.[interaction.user.id];
-    if (!postData) {
-      return interaction.reply({ content: 'Error: Session expired', ephemeral: true });
-    }
-    
-    const embed = new EmbedBuilder()
-      .setColor('#667eea')
-      .setTitle('📤 Upload Media')
-      .setDescription(`**Channel:** <#${postData.channelId}>\n**Title:** ${title || '(none)'}\n\n📎 Attach files below then click Send or Schedule`)
-      .addFields({ name: '⏰ Schedule', value: schedDate && schedTime ? `${schedDate} at ${schedTime}` : 'Immediate post' });
-    
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('send_now_' + interaction.user.id).setLabel('📤 Send Now').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('schedule_post_' + interaction.user.id).setLabel('⏰ Schedule').setStyle(ButtonStyle.Secondary).setDisabled(!schedDate || !schedTime),
-      new ButtonBuilder().setCustomId('cancel_post_' + interaction.user.id).setLabel('❌ Cancel').setStyle(ButtonStyle.Danger)
-    );
-    
-    discordClient.tempPostData[interaction.user.id] = { ...postData, title, schedDate, schedTime };
-    
-    await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
-  }
-  
-  if (interaction.isButton()) {
-    const buttonId = interaction.customId;
-    const userId = interaction.user.id;
-    
-    if (!buttonId.includes(userId)) return;
-    
-    const postData = discordClient.tempPostData?.[userId];
-    if (!postData) {
-      return interaction.reply({ content: 'Session expired', ephemeral: true });
-    }
-    
-    if (buttonId.startsWith('cancel_post_')) {
-      delete discordClient.tempPostData[userId];
-      return interaction.reply({ content: '❌ Cancelled', ephemeral: true });
-    }
-    
-    try {
-      await interaction.deferReply({ ephemeral: true });
+  try {
+    if (interaction.isCommand() && interaction.commandName === 'post') {
+      const channel = interaction.options.getChannel('channel');
       
-      const message = interaction.message;
-      const attachments = Array.from(message.attachments.values());
-      
-      if (attachments.length === 0) {
-        return interaction.editReply({ content: '❌ No files attached' });
+      if (!interaction.member.permissions.has('SEND_MESSAGES')) {
+        return interaction.reply({ content: 'You do not have permission', ephemeral: true });
       }
       
-      if (buttonId.startsWith('send_now_')) {
-        const channel = discordClient.channels.cache.get(postData.channelId);
-        const files = [];
-        
-        for (const att of attachments) {
-          const response = await require('node-fetch').default(att.url);
-          const buffer = await response.buffer();
-          const filePath = path.join(uploadsDir, `${Date.now()}-${att.name}`);
-          fs.writeFileSync(filePath, buffer);
-          files.push(filePath);
-        }
-        
-        await channel.send({ content: postData.title || '', files });
-        files.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
+      const modal = new ModalBuilder()
+        .setCustomId('postModal')
+        .setTitle('Post to ' + channel.name);
+      
+      const titleInput = new TextInputBuilder()
+        .setCustomId('titleInput')
+        .setLabel('Post Title (optional)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setPlaceholder('What is this post about?');
+      
+      const dateInput = new TextInputBuilder()
+        .setCustomId('dateInput')
+        .setLabel('Schedule Date (YYYY-MM-DD or blank)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false);
+      
+      const timeInput = new TextInputBuilder()
+        .setCustomId('timeInput')
+        .setLabel('Schedule Time (HH:MM or blank)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false);
+      
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(titleInput),
+        new ActionRowBuilder().addComponents(dateInput),
+        new ActionRowBuilder().addComponents(timeInput)
+      );
+      
+      discordClient.tempPostData = discordClient.tempPostData || {};
+      discordClient.tempPostData[interaction.user.id] = {
+        channelId: channel.id,
+        channelName: channel.name,
+        userId: interaction.user.id
+      };
+      
+      await interaction.showModal(modal);
+    }
+    
+    if (interaction.isModalSubmit() && interaction.customId === 'postModal') {
+      const title = interaction.fields.getTextInputValue('titleInput') || '';
+      const schedDate = interaction.fields.getTextInputValue('dateInput') || '';
+      const schedTime = interaction.fields.getTextInputValue('timeInput') || '';
+      
+      const postData = discordClient.tempPostData?.[interaction.user.id];
+      if (!postData) {
+        return interaction.reply({ content: 'Error: Session expired', ephemeral: true });
+      }
+      
+      const embed = new EmbedBuilder()
+        .setColor('#667eea')
+        .setTitle('📤 Upload Media')
+        .setDescription(`**Channel:** <#${postData.channelId}>\n**Title:** ${title || '(none)'}\n\n📎 Attach files below then click Send or Schedule`)
+        .addFields({ name: '⏰ Schedule', value: schedDate && schedTime ? `${schedDate} at ${schedTime}` : 'Immediate post' });
+      
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('send_now_' + interaction.user.id).setLabel('📤 Send Now').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('schedule_post_' + interaction.user.id).setLabel('⏰ Schedule').setStyle(ButtonStyle.Secondary).setDisabled(!schedDate || !schedTime),
+        new ButtonBuilder().setCustomId('cancel_post_' + interaction.user.id).setLabel('❌ Cancel').setStyle(ButtonStyle.Danger)
+      );
+      
+      discordClient.tempPostData[interaction.user.id] = { ...postData, title, schedDate, schedTime };
+      
+      await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+    }
+    
+    if (interaction.isButton()) {
+      const buttonId = interaction.customId;
+      const userId = interaction.user.id;
+      
+      if (!buttonId.includes(userId)) return;
+      
+      const postData = discordClient.tempPostData?.[userId];
+      if (!postData) {
+        return interaction.reply({ content: 'Session expired', ephemeral: true });
+      }
+      
+      if (buttonId.startsWith('cancel_post_')) {
         delete discordClient.tempPostData[userId];
-        
-        interaction.editReply({ content: '✅ Posted!' });
+        return interaction.reply({ content: '❌ Cancelled', ephemeral: true });
       }
       
-      if (buttonId.startsWith('schedule_post_')) {
-        const { schedDate, schedTime, title, channelId } = postData;
-        if (!schedDate || !schedTime) {
-          return interaction.editReply({ content: '❌ Schedule date/time required' });
+      try {
+        await interaction.deferReply({ ephemeral: true });
+        
+        const message = interaction.message;
+        const attachments = Array.from(message.attachments.values());
+        
+        if (attachments.length === 0) {
+          return interaction.editReply({ content: '❌ No files attached. Please attach files to the message.' });
         }
         
-        const taskId = `task-${Date.now()}`;
-        const files = [];
-        
-        for (const att of attachments) {
-          const response = await require('node-fetch').default(att.url);
-          const buffer = await response.buffer();
-          const filePath = path.join(uploadsDir, `${Date.now()}-${att.name}`);
-          fs.writeFileSync(filePath, buffer);
-          files.push(filePath);
+        if (buttonId.startsWith('send_now_')) {
+          const channel = discordClient.channels.cache.get(postData.channelId);
+          const files = [];
+          
+          for (const att of attachments) {
+            try {
+              const response = await fetch(att.url);
+              const buffer = await response.buffer();
+              const filePath = path.join(uploadsDir, `${Date.now()}-${att.name}`);
+              fs.writeFileSync(filePath, buffer);
+              files.push(filePath);
+            } catch (err) {
+              console.error('Error downloading file:', err.message);
+            }
+          }
+          
+          if (files.length > 0) {
+            await channel.send({ content: postData.title || '', files });
+            files.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
+          }
+          
+          delete discordClient.tempPostData[userId];
+          interaction.editReply({ content: '✅ Posted!' });
         }
         
-        const scheduledTime = new Date(`${schedDate}T${schedTime}`).toISOString();
-        const schedData = { id: taskId, channelId, title, files, scheduledTime };
-        
-        fs.writeFileSync(path.join(schedulesDir, `${taskId}.json`), JSON.stringify(schedData));
-        schedulePost(schedData);
-        
-        delete discordClient.tempPostData[userId];
-        interaction.editReply({ content: `✅ Scheduled for ${schedDate} at ${schedTime}` });
+        if (buttonId.startsWith('schedule_post_')) {
+          const { schedDate, schedTime, title, channelId } = postData;
+          if (!schedDate || !schedTime) {
+            return interaction.editReply({ content: '❌ Schedule date/time required' });
+          }
+          
+          const taskId = `task-${Date.now()}`;
+          const files = [];
+          
+          for (const att of attachments) {
+            try {
+              const response = await fetch(att.url);
+              const buffer = await response.buffer();
+              const filePath = path.join(uploadsDir, `${Date.now()}-${att.name}`);
+              fs.writeFileSync(filePath, buffer);
+              files.push(filePath);
+            } catch (err) {
+              console.error('Error downloading file:', err.message);
+            }
+          }
+          
+          if (files.length > 0) {
+            const scheduledTime = new Date(`${schedDate}T${schedTime}`).toISOString();
+            const schedData = { id: taskId, channelId, title, files, scheduledTime };
+            fs.writeFileSync(path.join(schedulesDir, `${taskId}.json`), JSON.stringify(schedData));
+            schedulePost(schedData);
+          }
+          
+          delete discordClient.tempPostData[userId];
+          interaction.editReply({ content: `✅ Scheduled for ${schedDate} at ${schedTime}` });
+        }
+      } catch (err) {
+        console.error('Button interaction error:', err);
+        interaction.editReply({ content: '❌ Error: ' + err.message });
       }
-    } catch (err) {
-      interaction.editReply({ content: '❌ Error: ' + err.message });
     }
+  } catch (err) {
+    console.error('Interaction error:', err);
   }
 });
 
 discordClient.on('error', err => console.error('Discord error:', err));
+discordClient.on('warn', msg => console.warn('Discord warn:', msg));
+
 discordClient.login(DISCORD_TOKEN).catch(err => {
-  console.error('Failed to login:', err.message);
+  console.error('Failed to login to Discord:', err.message);
+  process.exit(1);
 });
 
 // Schedulers
@@ -273,9 +291,7 @@ function schedulePost(data) {
         task.stop();
         scheduledTasks.delete(taskId);
         fs.unlinkSync(path.join(schedulesDir, `${taskId}.json`));
-        data.files.forEach(f => {
-          try { fs.unlinkSync(f); } catch (e) {}
-        });
+        data.files.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
         console.log(`✓ Post executed: ${taskId}`);
       } catch (err) {
         console.error(`Error executing ${taskId}:`, err.message);
@@ -301,7 +317,6 @@ async function sendPostToDiscord(channelId, title, filePaths) {
   }
 }
 
-// Auth
 function authMiddleware(req, res, next) {
   const pwd = req.headers['x-dashboard-pwd'] || req.query.pwd;
   if (!pwd || pwd !== DASHBOARD_PASSWORD) {
@@ -310,7 +325,7 @@ function authMiddleware(req, res, next) {
   next();
 }
 
-// Serve HTML
+// API Routes
 app.get('/', (req, res) => {
   res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -362,7 +377,6 @@ app.get('/', (req, res) => {
     .message.info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
     .schedule-card { background: #f8f9ff; border: 2px solid #e0e0e0; border-radius: 8px; padding: 15px; margin-bottom: 15px; transition: all 0.3s; }
     .schedule-card:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2); }
-    .schedule-card.editing { border-color: #667eea; background: #fff; }
     .schedule-title { font-weight: 600; color: #333; margin: 0 0 4px 0; }
     .schedule-time { color: #666; font-size: 12px; }
     .schedule-files { margin-top: 10px; padding: 8px; background: white; border-radius: 4px; font-size: 12px; max-height: 100px; overflow-y: auto; }
@@ -580,311 +594,4 @@ app.get('/', (req, res) => {
         showMessage('Post sent successfully!', 'success');
         selectedFiles = [];
         renderFileList();
-        document.getElementById('mediaForm').reset();
-      } catch (err) {
-        showMessage('Error: ' + err.message, 'error');
-      } finally {
-        document.getElementById('sendNowBtn').disabled = false;
-      }
-    });
-    
-    document.getElementById('scheduleBtn').addEventListener('click', async (e) => {
-      if (isScheduling) return;
-      e.preventDefault();
-      
-      const pwd = document.getElementById('password').value;
-      const channelId = document.getElementById('channel').value;
-      const title = document.getElementById('title').value;
-      const date = document.getElementById('scheduleDate').value;
-      const time = document.getElementById('scheduleTime').value;
-      
-      if (!pwd || !channelId || !date || !time || selectedFiles.length === 0) {
-        showMessage('Please fill in all fields and select files', 'error');
-        return;
-      }
-      
-      try {
-        document.getElementById('scheduleBtn').disabled = true;
-        showMessage('Uploading files...', 'info');
-        
-        const formData = new FormData();
-        selectedFiles.forEach(file => formData.append('files', file));
-        
-        const uploadRes = await fetch(API_URL + '/api/upload', {
-          method: 'POST',
-          headers: { 'x-dashboard-pwd': pwd },
-          body: formData
-        });
-        
-        if (!uploadRes.ok) throw new Error(await uploadRes.text());
-        const uploadData = await uploadRes.json();
-        
-        showMessage('Scheduling post...', 'info');
-        
-        const schedRes = await fetch(API_URL + '/api/schedule', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-dashboard-pwd': pwd },
-          body: JSON.stringify({ channelId, title, files: uploadData.files, scheduledTime: new Date(date + 'T' + time).toISOString() })
-        });
-        
-        if (!schedRes.ok) throw new Error(await schedRes.text());
-        
-        showMessage('Post scheduled successfully!', 'success');
-        selectedFiles = [];
-        renderFileList();
-        document.getElementById('mediaForm').reset();
-        document.getElementById('scheduleFields').classList.remove('show');
-        isScheduling = false;
-        setTimeout(() => loadSchedules(), 1000);
-      } catch (err) {
-        showMessage('Error: ' + err.message, 'error');
-      } finally {
-        document.getElementById('scheduleBtn').disabled = false;
-      }
-    });
-    
-    async function loadSchedules() {
-      if (!currentPassword) { showSchedulesMessage('Please enter password first', 'info'); return; }
-      
-      try {
-        const res = await fetch(API_URL + '/api/schedules', { headers: { 'x-dashboard-pwd': currentPassword } });
-        if (!res.ok) throw new Error('Failed to load schedules');
-        
-        allSchedules = await res.json();
-        renderSchedules();
-      } catch (err) {
-        showSchedulesMessage('Error loading schedules: ' + err.message, 'error');
-      }
-    }
-    
-    function renderSchedules() {
-      const list = document.getElementById('schedulesList');
-      const empty = document.getElementById('emptySchedules');
-      
-      if (allSchedules.length === 0) {
-        list.innerHTML = '';
-        empty.style.display = 'block';
-        return;
-      }
-      
-      empty.style.display = 'none';
-      list.innerHTML = allSchedules.map(sched => {
-        const time = new Date(sched.scheduledTime).toLocaleString();
-        return '<div class="schedule-card" id="card-' + sched.id + '"><h3 class="schedule-title" id="title-' + sched.id + '">' + (sched.title || 'Untitled') + '</h3><div class="schedule-time">⏰ ' + time + '</div><div class="schedule-files">' + sched.files.map(f => '<div class="schedule-file">📄 ' + f.split('/').pop() + '</div>').join('') + '</div><div class="edit-fields" id="edit-' + sched.id + '"><label>New Title</label><input type="text" class="edit-title" value="' + (sched.title || '') + '" placeholder="Update title"></div><div class="schedule-actions"><button class="btn-small btn-edit" onclick="editSchedule(\'' + sched.id + '\')">✏️ Edit</button><button class="btn-small btn-cancel" onclick="cancelEdit(\'' + sched.id + '\')" style="display:none;" id="cancel-' + sched.id + '">Cancel</button><button class="btn-small btn-save" onclick="saveSchedule(\'' + sched.id + '\')" style="display:none;" id="save-' + sched.id + '">💾 Save</button><button class="btn-small btn-delete" onclick="deleteSchedule(\'' + sched.id + '\')">🗑️ Delete</button></div></div>';
-      }).join('');
-    }
-    
-    function editSchedule(id) {
-      const card = document.getElementById('card-' + id);
-      const editBtn = card.querySelector('.btn-edit');
-      const saveBtn = document.getElementById('save-' + id);
-      const cancelBtn = document.getElementById('cancel-' + id);
-      const editFields = document.getElementById('edit-' + id);
-      card.classList.add('editing');
-      editFields.classList.add('show');
-      editBtn.style.display = 'none';
-      saveBtn.style.display = 'block';
-      cancelBtn.style.display = 'block';
-    }
-    
-    function cancelEdit(id) {
-      const card = document.getElementById('card-' + id);
-      const editBtn = card.querySelector('.btn-edit');
-      const saveBtn = document.getElementById('save-' + id);
-      const cancelBtn = document.getElementById('cancel-' + id);
-      const editFields = document.getElementById('edit-' + id);
-      card.classList.remove('editing');
-      editFields.classList.remove('show');
-      editBtn.style.display = 'block';
-      saveBtn.style.display = 'none';
-      cancelBtn.style.display = 'none';
-    }
-    
-    async function saveSchedule(id) {
-      const newTitle = document.querySelector('#edit-' + id + ' .edit-title').value;
-      try {
-        const res = await fetch(API_URL + '/api/schedule/' + id, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'x-dashboard-pwd': currentPassword },
-          body: JSON.stringify({ title: newTitle })
-        });
-        if (!res.ok) throw new Error('Failed to save');
-        const idx = allSchedules.findIndex(s => s.id === id);
-        if (idx !== -1) allSchedules[idx].title = newTitle;
-        cancelEdit(id);
-        document.getElementById('title-' + id).textContent = newTitle || 'Untitled';
-        showSchedulesMessage('Schedule updated!', 'success');
-      } catch (err) {
-        showSchedulesMessage('Error: ' + err.message, 'error');
-      }
-    }
-    
-    async function deleteSchedule(id) {
-      if (!confirm('Delete this scheduled post?')) return;
-      try {
-        const res = await fetch(API_URL + '/api/schedule/' + id, {
-          method: 'DELETE',
-          headers: { 'x-dashboard-pwd': currentPassword }
-        });
-        if (!res.ok) throw new Error('Failed to delete');
-        allSchedules = allSchedules.filter(s => s.id !== id);
-        renderSchedules();
-        showSchedulesMessage('Schedule deleted!', 'success');
-      } catch (err) {
-        showSchedulesMessage('Error: ' + err.message, 'error');
-      }
-    }
-    
-    function showMessage(text, type) {
-      const msg = document.getElementById('message');
-      msg.textContent = text;
-      msg.className = 'message show ' + type;
-      if (type === 'success' || type === 'error') setTimeout(() => msg.classList.remove('show'), 5000);
-    }
-  </script>
-</body>
-</html>`);
-});
-
-// API Endpoints
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', bot: discordClient.readyAt ? 'ready' : 'connecting' });
-});
-
-app.get('/api/active-users', (req, res) => {
-  res.json({ count: activeUsers.size });
-});
-
-app.get('/api/channels', authMiddleware, async (req, res) => {
-  try {
-    if (!discordClient.readyAt) {
-      return res.status(503).json({ error: 'Discord bot not ready yet' });
-    }
-    
-    const channels = [];
-    for (const guild of discordClient.guilds.cache.values()) {
-      for (const channel of guild.channels.cache.values()) {
-        if (channel.isSendable?.() && (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement)) {
-          channels.push({ id: channel.id, name: `#${channel.name}`, guild: guild.name });
-        }
-      }
-    }
-    res.json(channels);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/schedules', authMiddleware, (req, res) => {
-  try {
-    const files = fs.readdirSync(schedulesDir);
-    const schedules = files.map(file => JSON.parse(fs.readFileSync(path.join(schedulesDir, file), 'utf8')));
-    res.json(schedules);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/upload', authMiddleware, upload.array('files', 10), (req, res) => {
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json({ error: 'No files uploaded' });
-  }
-  const filePaths = req.files.map(f => path.join(uploadsDir, f.filename));
-  res.json({ files: filePaths, count: filePaths.length });
-});
-
-app.post('/api/send-now', authMiddleware, async (req, res) => {
-  const { channelId, title, files } = req.body;
-  if (!channelId || !files || files.length === 0) {
-    return res.status(400).json({ error: 'Missing channelId or files' });
-  }
-  
-  try {
-    await sendPostToDiscord(channelId, title, files);
-    files.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
-    res.json({ success: true, message: 'Post sent!' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/schedule', authMiddleware, (req, res) => {
-  const { channelId, title, files, scheduledTime } = req.body;
-  if (!channelId || !files || !scheduledTime) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-  
-  const schedTime = new Date(scheduledTime);
-  if (schedTime <= new Date()) {
-    return res.status(400).json({ error: 'Scheduled time must be in the future' });
-  }
-  
-  const taskId = `task-${Date.now()}`;
-  const schedData = { id: taskId, channelId, title, files, scheduledTime };
-  
-  try {
-    fs.writeFileSync(path.join(schedulesDir, `${taskId}.json`), JSON.stringify(schedData));
-    schedulePost(schedData);
-    res.json({ success: true, taskId, message: 'Post scheduled!' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.put('/api/schedule/:id', authMiddleware, (req, res) => {
-  const { id } = req.params;
-  const { title } = req.body;
-  
-  try {
-    const filePath = path.join(schedulesDir, `${id}.json`);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'Schedule not found' });
-    }
-    
-    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    data.title = title;
-    fs.writeFileSync(filePath, JSON.stringify(data));
-    res.json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete('/api/schedule/:id', authMiddleware, (req, res) => {
-  const { id } = req.params;
-  
-  try {
-    const filePath = path.join(schedulesDir, `${id}.json`);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'Schedule not found' });
-    }
-    
-    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    
-    if (scheduledTasks.has(id)) {
-      scheduledTasks.get(id).stop();
-      scheduledTasks.delete(id);
-    }
-    
-    data.files.forEach(f => { try { fs.unlinkSync(f); } catch (e) {} });
-    fs.unlinkSync(filePath);
-    
-    res.json({ success: true, message: 'Schedule deleted' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`\n✓ Server running on port ${PORT}`);
-  console.log(`✓ Dashboard: http://localhost:${PORT}\n`);
-  setTimeout(() => loadSchedules(), 3000);
-});'error') setTimeout(() => msg.classList.remove('show'), 5000);
-    }
-    
-    function showSchedulesMessage(text, type) {
-      const msg = document.getElementById('schedulesMessage');
-      msg.textContent = text;
-      msg.className = 'message show ' + type;
-      if (type === 'success' || type ===
+        document.getElementById('mediaForm
