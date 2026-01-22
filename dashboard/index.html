@@ -328,9 +328,9 @@
   </div>
   
   <script>
-    const API_URL = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
-      ? 'http://localhost:8000'
-      : window.location.origin.replace(/^https?:/, '').replace(/\/$/, '');
+    // IMPORTANT: Update this to your Koyeb backend URL
+    // Example: https://your-service-xxxxx.koyeb.app
+    const API_URL = 'https://your-koyeb-url-here.koyeb.app'; // ← CHANGE THIS TO YOUR KOYEB URL
     
     let selectedFiles = [];
     let isScheduling = false;
