@@ -16,28 +16,40 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+/* ================= SECURITY (CSP FIX) ================= */
+
+app.use((req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;"
+  );
+  next();
+});
+
 /* ================= EXPRESS ================= */
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, "public")));
+
 app.use("/uploads", express.static(uploadsDir));
+app.use(express.static(path.join(__dirname, "public")));
+
+/* ✅ FIX 404 ROOT */
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 
 const upload = multer({ dest: uploadsDir });
 
 /* ================= DISCORD BOT ================= */
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds
-  ]
+  intents: [GatewayIntentBits.Guilds]
 });
 
-client.login(DISCORD_TOKEN).then(() => {
-  console.log("🤖 Discord bot logged in");
-}).catch(err => {
-  console.error("❌ Failed to login:", err.message);
-});
+client.login(DISCORD_TOKEN)
+  .then(() => console.log("🤖 Discord bot logged in"))
+  .catch(err => console.error("❌ Discord login failed:", err.message));
 
 /* ================= AUTH ================= */
 
@@ -69,7 +81,7 @@ app.get("/api/channels", auth, async (req, res) => {
         });
     });
     res.json(channels);
-  } catch (err) {
+  } catch {
     res.status(500).send("Failed to load channels");
   }
 });
@@ -79,6 +91,8 @@ app.post("/api/upload", auth, upload.array("files"), (req, res) => {
     files: req.files.map(f => `/uploads/${f.filename}`)
   });
 });
+
+/* ================= START ================= */
 
 app.listen(PORT, () => {
   console.log(`✓ Server running on port ${PORT}`);
