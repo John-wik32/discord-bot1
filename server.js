@@ -18,8 +18,6 @@ if (!DISCORD_TOKEN) {
   console.error('❌ ERROR: DISCORD_TOKEN is required');
   process.exit(1);
 }
-
-const uploadsDir = path.join(__dirname, 'uploads');
 const schedulesDir = path.join(__dirname, 'schedules');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 if (!fs.existsSync(schedulesDir)) fs.mkdirSync(schedulesDir, { recursive: true });
@@ -43,7 +41,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve dashboard - embedded HTML
+// DASHBOARD ROUTE - SERVE EMBEDDED HTML
 app.get('/', (req, res) => {
   res.send(`<!DOCTYPE html>
 <html lang="en">
