@@ -182,6 +182,10 @@ function authMiddleware(req, res, next) {
   next();
 }
 
+app.get("/api/test", authMiddleware, (req, res) => {
+  res.json({ success: true });
+});
+
 app.get("/api/channels", authMiddleware, async (req, res) => {
   try {
     if (!discordClient.readyAt) return res.status(503).json({ error: "Bot not ready" });
