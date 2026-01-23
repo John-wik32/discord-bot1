@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Video Dashboard</title>
+    <style>
+        body { font-family: sans-serif; background: #1e1e2e; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .container { background: #2b2b3b; padding: 2rem; border-radius: 10px; width: 400px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h2 { text-align: center; margin-bottom: 1.5rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
+        input, select, button { width: 100%; padding: 10px; margin-bottom: 1rem; border-radius: 5px; border: none; box-sizing: border-box; }
+        input, select { background: #181825; color: #fff; border: 1px solid #45475a; }
+        button { background: #5865F2; color: white; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button:hover { background: #4752c4; }
+        .status { text-align: center; font-size: 0.9rem; margin-top: 10px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Video Controller</h2>
+    
+    <div id="authSection">
+        <label>Dashboard Password</label>
+        <input type="password" id="passwordInput" placeholder="Enter password">
+        <button onclick="loadChannels()">Login & Load Channels</button>
+    </div>
+
+    <form id="uploadForm" class="hidden">
+        <label>Select Channel</label>
+        <select id="channelSelect" required>
+            <option value="">-- Select a Channel --</option>
+        </select>
+
+        <label>Post Title</label>
+        <input type="text" id="titleInput" placeholder="Check out this video!" required>
+
+        <label>Upload Videos (Max 5)</label>
+        <input type="file" id="fileInput" multiple accept="video/*" required>
+
+        <button type="submit" id="sendBtn">Send to Discord</button>
+    </form>
+
+    <div id="statusMessage" class="status"></div>
+</div>
+
+<script>
+    let password = '';
+
+    async function loadChannels() {
+        const passVal = document.getElementById('passwordInput').value;
+        const status = document.getElementById('statusMessage');
+        
+        status.textContent = "Loading channels...";
+        status.style.color = "#ccc";
+
+        try {
+            const res = await fetch('/api/channels', {
+                headers: { 'Authorization': passVal }
+            });
+
+            if (res.status === 401) {
+                status.textContent = "Incorrect Password.";
+                status.style.color = "#ff5555";
+                return;
+            }
+
+            const channels = await res.json();
+            const select = document.getElementById('channelSelect');
+            select.innerHTML = '<option value="">-- Select a Channel --</option>'; // Reset
+            
+            channels.forEach(ch => {
+                const opt = document.createElement('option');
+                opt.value = ch.id;
+                opt.textContent = ch.name;
+                select.appendChild(opt);
+            });
+
+            // Success
+            password = passVal;
+            document.getElementById('authSection').classList.add('hidden');
+            document.getElementById('uploadForm').classList.remove('hidden');
+            status.textContent = "";
+        } catch (e) {
+            status.textContent = "Error loading channels.";
+        }
+    }
+
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const status = document.getElementById('statusMessage');
+        const btn = document.getElementById('sendBtn');
+        
+        const channelId = document.getElementById('channelSelect').value;
+        const title = document.getElementById('titleInput').value;
+        const files = document.getElementById('fileInput').files;
+
+        if (!channelId || files.length === 0) {
+            status.textContent = "Please select a channel and files.";
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('channelId', channelId);
+        formData.append('title', title);
+        for (let i = 0; i < files.length; i++) {
+            formData.append('videos', files[i]);
+        }
+
+        btn.disabled = true;
+        btn.textContent = "Sending...";
+        status.textContent = "";
+
+        try {
+            const res = await fetch('/api/send', {
+                method: 'POST',
+                headers: { 'Authorization': password },
+                body: formData
+            });
+
+            const data = await res.json();
+
+            if (res.ok) {
+                status.textContent = "Sent successfully!";
+                status.style.color = "#55ff55";
+                document.getElementById('uploadForm').reset();
+            } else {
+                status.textContent = "Error: " + (data.error || "Unknown error");
+                status.style.color = "#ff5555";
+            }
+        } catch (e) {
+            status.textContent = "Network error.";
+            status.style.color = "#ff5555";
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Send to Discord";
+        }
+    });
+</script>
+
+</body>
+</html>
