@@ -266,7 +266,22 @@ const discordClient = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages]
 });
 
+// Discord Bot
+const discordClient = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages]
+});
+
 const scheduledTasks = new Map();
+
+discordClient.once("ready", async () => {
+  console.log(`✓ Bot logged in as ${discordClient.user.tag}`);
+  console.log(`✓ Bot in ${discordClient.guilds.cache.size} guild(s)`);
+});
+
+discordClient.on("error", err => console.error("❌ Discord error:", err.message));
+discordClient.login(DISCORD_TOKEN).catch(err => {
+  console.error("❌ Failed to login:", err.message);
+});
 
 discordClient.once("ready", async () => {
   console.log(`✓ Bot logged in as ${discordClient.user.tag}`);
