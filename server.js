@@ -182,8 +182,22 @@ function authMiddleware(req, res, next) {
   next();
 }
 
-app.get("/api/test", authMiddleware, (req, res) => {
-  res.json({ success: true });
+app.get("/api/channels", authMiddleware, async (req, res) => {
+  try {
+    if (!discordClient.readyAt) return res.status(503).json({ error: "Bot not ready" });
+    
+    const channels = [];
+    for (const guild of discordClient.guilds.cache.values()) {
+      for (const channel of guild.channels.cache.values()) {
+        if (channel.isSendable?.() && (channel.type === 0 || channel.type === 5)) {
+          channels.push({ id: channel.id, name: `#${channel.name}`, guild: guild.name });
+        }
+      }
+    }
+    res.json(channels);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/api/upload", authMiddleware, upload.array("files", 10), async (req, res) => {
