@@ -3,42 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot Video Dashboard</title>
+    <title>Advanced Bot Dashboard</title>
     <style>
         body { font-family: sans-serif; background: #1e1e2e; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .container { background: #2b2b3b; padding: 2rem; border-radius: 10px; width: 400px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        h2 { text-align: center; margin-bottom: 1.5rem; }
-        label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
-        input, select, button { width: 100%; padding: 10px; margin-bottom: 1rem; border-radius: 5px; border: none; box-sizing: border-box; }
+        .container { background: #2b2b3b; padding: 2rem; border-radius: 10px; width: 450px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h2 { text-align: center; margin-bottom: 1.5rem; color: #5865F2; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: bold; font-size: 0.9rem; color: #a6a7ab; }
+        input, select, button { width: 100%; padding: 12px; margin-bottom: 1rem; border-radius: 5px; border: none; box-sizing: border-box; }
         input, select { background: #181825; color: #fff; border: 1px solid #45475a; }
-        button { background: #5865F2; color: white; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button { background: #5865F2; color: white; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 1rem; }
         button:hover { background: #4752c4; }
-        .status { text-align: center; font-size: 0.9rem; margin-top: 10px; }
+        button:disabled { background: #3c3c4f; cursor: not-allowed; }
+        
+        .progress-container { width: 100%; background: #181825; border-radius: 5px; margin-bottom: 1rem; display: none; overflow: hidden; }
+        .progress-bar { width: 0%; height: 10px; background: #2ecc71; transition: width 0.2s; }
+        
+        .status { text-align: center; font-size: 0.9rem; margin-top: 10px; min-height: 20px; }
         .hidden { display: none; }
+        
+        /* Video Preview Styles */
+        .preview-list { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 1rem; }
+        .preview-item { font-size: 0.8rem; background: #181825; padding: 5px 10px; border-radius: 4px; border: 1px solid #5865F2; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Video Controller</h2>
+    <h2>Bot Dashboard</h2>
     
     <div id="authSection">
         <label>Dashboard Password</label>
         <input type="password" id="passwordInput" placeholder="Enter password">
-        <button onclick="loadChannels()">Login & Load Channels</button>
+        <button onclick="loadChannels()">Login</button>
     </div>
 
     <form id="uploadForm" class="hidden">
         <label>Select Channel</label>
-        <select id="channelSelect" required>
-            <option value="">-- Select a Channel --</option>
-        </select>
+        <select id="channelSelect" required></select>
 
         <label>Post Title</label>
-        <input type="text" id="titleInput" placeholder="Check out this video!" required>
+        <input type="text" id="titleInput" placeholder="Video Title..." required>
 
-        <label>Upload Videos (Max 5)</label>
-        <input type="file" id="fileInput" multiple accept="video/*" required>
+        <label>Upload Videos (Max 5, < 25MB each)</label>
+        <input type="file" id="fileInput" multiple accept="video/*" required onchange="updatePreviews()">
+        
+        <div id="previewArea" class="preview-list"></div>
+
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
 
         <button type="submit" id="sendBtn">Send to Discord</button>
     </form>
@@ -49,94 +62,120 @@
 <script>
     let password = '';
 
+    // 1. Load Channels
     async function loadChannels() {
         const passVal = document.getElementById('passwordInput').value;
         const status = document.getElementById('statusMessage');
-        
-        status.textContent = "Loading channels...";
-        status.style.color = "#ccc";
+        status.textContent = "Loading...";
 
         try {
-            const res = await fetch('/api/channels', {
-                headers: { 'Authorization': passVal }
-            });
-
+            const res = await fetch('/api/channels', { headers: { 'Authorization': passVal } });
             if (res.status === 401) {
                 status.textContent = "Incorrect Password.";
                 status.style.color = "#ff5555";
                 return;
             }
-
             const channels = await res.json();
             const select = document.getElementById('channelSelect');
-            select.innerHTML = '<option value="">-- Select a Channel --</option>'; // Reset
-            
+            select.innerHTML = '<option value="">-- Select Channel --</option>';
             channels.forEach(ch => {
                 const opt = document.createElement('option');
                 opt.value = ch.id;
                 opt.textContent = ch.name;
                 select.appendChild(opt);
             });
-
-            // Success
             password = passVal;
             document.getElementById('authSection').classList.add('hidden');
             document.getElementById('uploadForm').classList.remove('hidden');
             status.textContent = "";
-        } catch (e) {
-            status.textContent = "Error loading channels.";
+        } catch (e) { status.textContent = "Error loading channels."; }
+    }
+
+    // 2. Show File Names on Selection
+    function updatePreviews() {
+        const files = document.getElementById('fileInput').files;
+        const area = document.getElementById('previewArea');
+        area.innerHTML = '';
+        if(files.length > 5) {
+            alert("Max 5 files allowed!");
+            document.getElementById('fileInput').value = "";
+            return;
+        }
+        for(let f of files) {
+            const div = document.createElement('div');
+            div.className = 'preview-item';
+            div.textContent = `🎥 ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`;
+            area.appendChild(div);
         }
     }
 
-    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+    // 3. Upload with Progress Bar (Using XHR)
+    document.getElementById('uploadForm').addEventListener('submit', (e) => {
         e.preventDefault();
         const status = document.getElementById('statusMessage');
         const btn = document.getElementById('sendBtn');
+        const pBar = document.getElementById('progressBar');
+        const pContainer = document.getElementById('progressContainer');
         
         const channelId = document.getElementById('channelSelect').value;
         const title = document.getElementById('titleInput').value;
         const files = document.getElementById('fileInput').files;
 
-        if (!channelId || files.length === 0) {
-            status.textContent = "Please select a channel and files.";
-            return;
-        }
+        if (!channelId || files.length === 0) return;
 
         const formData = new FormData();
         formData.append('channelId', channelId);
         formData.append('title', title);
-        for (let i = 0; i < files.length; i++) {
-            formData.append('videos', files[i]);
-        }
+        for (let i = 0; i < files.length; i++) formData.append('videos', files[i]);
 
+        // UI Updates
         btn.disabled = true;
-        btn.textContent = "Sending...";
-        status.textContent = "";
+        status.textContent = "Uploading...";
+        status.style.color = "#fff";
+        pContainer.style.display = "block";
+        pBar.style.width = "0%";
 
-        try {
-            const res = await fetch('/api/send', {
-                method: 'POST',
-                headers: { 'Authorization': password },
-                body: formData
-            });
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/send', true);
+        xhr.setRequestHeader('Authorization', password);
 
-            const data = await res.json();
+        // Progress Event
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const percent = (e.loaded / e.total) * 100;
+                pBar.style.width = percent + '%';
+                status.textContent = `Uploading: ${Math.round(percent)}%`;
+            }
+        };
 
-            if (res.ok) {
-                status.textContent = "Sent successfully!";
-                status.style.color = "#55ff55";
+        // Complete Event
+        xhr.onload = function () {
+            btn.disabled = false;
+            pContainer.style.display = "none";
+            
+            if (xhr.status === 200) {
+                status.textContent = "✅ Sent successfully!";
+                status.style.color = "#2ecc71";
                 document.getElementById('uploadForm').reset();
+                document.getElementById('previewArea').innerHTML = '';
             } else {
-                status.textContent = "Error: " + (data.error || "Unknown error");
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    status.textContent = "❌ Error: " + data.error;
+                } catch(e) {
+                    status.textContent = "❌ Upload failed.";
+                }
                 status.style.color = "#ff5555";
             }
-        } catch (e) {
-            status.textContent = "Network error.";
-            status.style.color = "#ff5555";
-        } finally {
+        };
+
+        xhr.onerror = function () {
             btn.disabled = false;
-            btn.textContent = "Send to Discord";
-        }
+            status.textContent = "❌ Network Error";
+            status.style.color = "#ff5555";
+        };
+
+        xhr.send(formData);
     });
 </script>
 
