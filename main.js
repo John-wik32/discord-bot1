@@ -22,49 +22,64 @@ const upload = multer({ dest: 'uploads/' });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 1. Favicon Fix
-app.get('/favicon.ico', (req, res) => res.status(204).end());
-
-// 2. Keep Alive
+// 1. Keep Alive / Health Check
 app.get('/', (req, res) => {
-    res.send('Bot is online.');
+    res.send(`Bot Status: ${client.isReady() ? 'ONLINE ✅' : 'STARTING ⏳'}`);
 });
+
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // --- ROUTES ---
 
-// Get Channels
+// Get Channels (With "Bot Ready" Check)
 app.get('/api/channels', async (req, res) => {
-    if (req.headers.authorization !== DASHBOARD_PASSWORD) {
+    const authHeader = req.headers.authorization;
+    if (authHeader !== DASHBOARD_PASSWORD) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
+
+    // CRITICAL FIX: Check if bot is ready
+    if (!client.isReady()) {
+        return res.status(503).json({ error: 'Bot is waking up... try again in 10 seconds.' });
+    }
+
     try {
         const channels = [];
+        // Refresh cache to ensure we see new channels
+        await client.guilds.fetch(); 
+        
         client.guilds.cache.forEach(guild => {
             guild.channels.cache.forEach(channel => {
-                if (channel.type === ChannelType.GuildText && channel.permissionsFor(client.user).has('SendMessages')) {
-                    channels.push({ id: channel.id, name: `${guild.name} - #${channel.name}` });
+                // Check for Text Channels and Write Permissions
+                if (channel.type === ChannelType.GuildText && 
+                    channel.permissionsFor(client.user)?.has('SendMessages')) {
+                    channels.push({
+                        id: channel.id,
+                        name: `${guild.name} - #${channel.name}`
+                    });
                 }
             });
         });
+        
+        if (channels.length === 0) {
+             return res.status(404).json({ error: 'No channels found. Is the bot in a server?' });
+        }
+
         res.json(channels);
     } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch channels' });
+        console.error("Channel Fetch Error:", error);
+        res.status(500).json({ error: 'Failed to fetch channels. Check bot logs.' });
     }
 });
 
-// Send Video (The Fixed Version)
+// Send Video (Fire & Forget)
 app.post('/api/send', upload.array('videos', 5), (req, res) => {
     const authHeader = req.headers.authorization;
     const { channelId, title } = req.body;
     const files = req.files;
 
-    // Helper to delete files
-    const cleanupFiles = (f) => {
-        if (!f) return;
-        f.forEach(file => fs.unlink(file.path, () => {}));
-    };
+    const cleanupFiles = (f) => { if (f) f.forEach(file => fs.unlink(file.path, () => {})); };
 
-    // 1. Validation
     if (authHeader !== DASHBOARD_PASSWORD) {
         cleanupFiles(files);
         return res.status(401).json({ error: 'Invalid Password' });
@@ -75,11 +90,15 @@ app.post('/api/send', upload.array('videos', 5), (req, res) => {
         return res.status(400).json({ error: 'Missing data' });
     }
 
-    // 2. FAST RESPONSE (Prevents 504 Timeout)
-    // We tell the browser "Success" immediately, then do the work.
-    res.json({ success: true, message: 'Upload received! Sending to Discord in background...' });
+    if (!client.isReady()) {
+        cleanupFiles(files);
+        return res.status(503).json({ error: 'Bot is offline. Please wait.' });
+    }
 
-    // 3. Background Processing
+    // Immediate Response
+    res.json({ success: true, message: 'Processing upload...' });
+
+    // Background Process
     (async () => {
         try {
             const channel = await client.channels.fetch(channelId);
@@ -90,18 +109,13 @@ app.post('/api/send', upload.array('videos', 5), (req, res) => {
                 name: file.originalname
             }));
 
-            // This takes time, but the user is already happy
             await channel.send({
                 content: `**${title || 'New Video Upload'}**`,
                 files: attachments
             });
-
-            console.log(`Successfully sent ${files.length} videos to ${channel.name}`);
-
+            console.log(`Sent videos to ${channel.name}`);
         } catch (error) {
-            console.error('Background Upload Failed:', error);
-            // Since we already told the user "Success", we can't notify them on the dashboard anymore.
-            // But the bot logs will show the error.
+            console.error('Upload Error:', error);
         } finally {
             cleanupFiles(files);
         }
@@ -109,6 +123,9 @@ app.post('/api/send', upload.array('videos', 5), (req, res) => {
 });
 
 // --- START ---
-client.once('ready', () => console.log(`Logged in as ${client.user.tag}`));
+client.once('ready', () => {
+    console.log(`✅ Discord Bot logged in as ${client.user.tag}`);
+});
+
 client.login(DISCORD_TOKEN);
-app.listen(PORT, () => console.log(`Dashboard running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
