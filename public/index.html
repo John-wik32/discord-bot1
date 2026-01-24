@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,9 +11,28 @@
         label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
         input, select, button { width: 100%; padding: 10px; margin-bottom: 1rem; border-radius: 5px; border: none; box-sizing: border-box; }
         input, select { background: #181825; color: #fff; border: 1px solid #45475a; }
+        
         button { background: #5865F2; color: white; cursor: pointer; font-weight: bold; transition: 0.2s; }
         button:hover { background: #4752c4; }
-        .status { text-align: center; font-size: 0.9rem; margin-top: 10px; }
+        button:disabled { background: #3c3c4f; cursor: not-allowed; }
+
+        /* Progress Bar Styles */
+        .progress-wrapper {
+            width: 100%;
+            background-color: #181825;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+            display: none; /* Hidden by default */
+            overflow: hidden;
+        }
+        .progress-bar {
+            width: 0%;
+            height: 20px;
+            background-color: #2ecc71; /* Green */
+            transition: width 0.2s;
+        }
+
+        .status { text-align: center; font-size: 0.9rem; margin-top: 10px; min-height: 1.2em; }
         .hidden { display: none; }
     </style>
 </head>
@@ -40,6 +58,10 @@
 
         <label>Upload Videos (Max 5)</label>
         <input type="file" id="fileInput" multiple accept="video/*" required>
+
+        <div class="progress-wrapper" id="progressWrapper">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
 
         <button type="submit" id="sendBtn">Send to Discord</button>
     </form>
@@ -70,7 +92,7 @@
 
             const channels = await res.json();
             const select = document.getElementById('channelSelect');
-            select.innerHTML = '<option value="">-- Select a Channel --</option>'; // Reset
+            select.innerHTML = '<option value="">-- Select a Channel --</option>';
             
             channels.forEach(ch => {
                 const opt = document.createElement('option');
@@ -79,7 +101,6 @@
                 select.appendChild(opt);
             });
 
-            // Success
             password = passVal;
             document.getElementById('authSection').classList.add('hidden');
             document.getElementById('uploadForm').classList.remove('hidden');
@@ -89,11 +110,16 @@
         }
     }
 
-    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+    document.getElementById('uploadForm').addEventListener('submit', (e) => {
         e.preventDefault();
+        
+        // UI Elements
         const status = document.getElementById('statusMessage');
         const btn = document.getElementById('sendBtn');
+        const progressWrapper = document.getElementById('progressWrapper');
+        const progressBar = document.getElementById('progressBar');
         
+        // Data
         const channelId = document.getElementById('channelSelect').value;
         const title = document.getElementById('titleInput').value;
         const files = document.getElementById('fileInput').files;
@@ -103,6 +129,7 @@
             return;
         }
 
+        // Prepare Data
         const formData = new FormData();
         formData.append('channelId', channelId);
         formData.append('title', title);
@@ -110,34 +137,56 @@
             formData.append('videos', files[i]);
         }
 
+        // Reset UI for Upload
         btn.disabled = true;
-        btn.textContent = "Sending...";
-        status.textContent = "";
+        progressWrapper.style.display = 'block';
+        progressBar.style.width = '0%';
+        status.textContent = "Starting upload...";
+        status.style.color = "#fff";
 
-        try {
-            const res = await fetch('/api/send', {
-                method: 'POST',
-                headers: { 'Authorization': password },
-                body: formData
-            });
+        // Create XHR Request (Better than fetch for progress)
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/send', true);
+        xhr.setRequestHeader('Authorization', password);
 
-            const data = await res.json();
+        // Track Upload Progress
+        xhr.upload.onprogress = function(e) {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                progressBar.style.width = percentComplete + '%';
+                status.textContent = `Uploading: ${Math.round(percentComplete)}%`;
+            }
+        };
 
-            if (res.ok) {
-                status.textContent = "Sent successfully!";
+        // Handle Completion
+        xhr.onload = function() {
+            btn.disabled = false;
+            if (xhr.status === 200) {
+                status.textContent = "✅ Videos sent successfully!";
                 status.style.color = "#55ff55";
                 document.getElementById('uploadForm').reset();
+                progressBar.style.width = '0%';
+                setTimeout(() => { progressWrapper.style.display = 'none'; }, 2000);
             } else {
-                status.textContent = "Error: " + (data.error || "Unknown error");
+                let errorMsg = "Unknown error";
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    errorMsg = response.error;
+                } catch(err) {}
+                status.textContent = "Error: " + errorMsg;
                 status.style.color = "#ff5555";
             }
-        } catch (e) {
-            status.textContent = "Network error.";
-            status.style.color = "#ff5555";
-        } finally {
+        };
+
+        // Handle Network Errors
+        xhr.onerror = function() {
             btn.disabled = false;
-            btn.textContent = "Send to Discord";
-        }
+            status.textContent = "Network failure.";
+            status.style.color = "#ff5555";
+        };
+
+        // Send
+        xhr.send(formData);
     });
 </script>
 
