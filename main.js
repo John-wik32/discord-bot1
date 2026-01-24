@@ -15,42 +15,38 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-// --- EXPRESS APP ---
+// --- EXPRESS APP SETUP ---
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 1. Keep Alive / Health Check
-app.get('/', (req, res) => {
-    res.send(`Bot Status: ${client.isReady() ? 'ONLINE ✅' : 'STARTING ⏳'}`);
-});
-
+// Fix for Favicon 404
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-// --- ROUTES ---
+// Health Check / Wake up endpoint
+app.get('/', (req, res) => {
+    res.send(`Bot Status: ${client.isReady() ? 'ONLINE ✅' : 'CONNECTING ⏳'}`);
+});
 
-// Get Channels (With "Bot Ready" Check)
-app.get('/api/channels', async (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (authHeader !== DASHBOARD_PASSWORD) {
+// --- API ROUTES ---
+
+// 1. Get Channels (Optimized for speed)
+app.get('/api/channels', (req, res) => {
+    if (req.headers.authorization !== DASHBOARD_PASSWORD) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // CRITICAL FIX: Check if bot is ready
     if (!client.isReady()) {
-        return res.status(503).json({ error: 'Bot is waking up... try again in 10 seconds.' });
+        return res.status(503).json({ error: 'Bot is waking up...' });
     }
 
     try {
         const channels = [];
-        // Refresh cache to ensure we see new channels
-        await client.guilds.fetch(); 
-        
+        // Use cache only for instant response to avoid 504 timeouts
         client.guilds.cache.forEach(guild => {
             guild.channels.cache.forEach(channel => {
-                // Check for Text Channels and Write Permissions
                 if (channel.type === ChannelType.GuildText && 
                     channel.permissionsFor(client.user)?.has('SendMessages')) {
                     channels.push({
@@ -60,19 +56,13 @@ app.get('/api/channels', async (req, res) => {
                 }
             });
         });
-        
-        if (channels.length === 0) {
-             return res.status(404).json({ error: 'No channels found. Is the bot in a server?' });
-        }
-
         res.json(channels);
     } catch (error) {
-        console.error("Channel Fetch Error:", error);
-        res.status(500).json({ error: 'Failed to fetch channels. Check bot logs.' });
+        res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 
-// Send Video (Fire & Forget)
+// 2. Send Video (Fire-and-Forget to prevent Gateway Timeouts)
 app.post('/api/send', upload.array('videos', 5), (req, res) => {
     const authHeader = req.headers.authorization;
     const { channelId, title } = req.body;
@@ -80,25 +70,15 @@ app.post('/api/send', upload.array('videos', 5), (req, res) => {
 
     const cleanupFiles = (f) => { if (f) f.forEach(file => fs.unlink(file.path, () => {})); };
 
-    if (authHeader !== DASHBOARD_PASSWORD) {
+    if (authHeader !== DASHBOARD_PASSWORD || !client.isReady()) {
         cleanupFiles(files);
-        return res.status(401).json({ error: 'Invalid Password' });
+        return res.status(403).json({ error: 'Forbidden or Bot Offline' });
     }
 
-    if (!channelId || !files || files.length === 0) {
-        cleanupFiles(files);
-        return res.status(400).json({ error: 'Missing data' });
-    }
+    // RESPOND IMMEDIATELY to prevent the 504 error
+    res.json({ success: true, message: 'Upload received! Processing in background...' });
 
-    if (!client.isReady()) {
-        cleanupFiles(files);
-        return res.status(503).json({ error: 'Bot is offline. Please wait.' });
-    }
-
-    // Immediate Response
-    res.json({ success: true, message: 'Processing upload...' });
-
-    // Background Process
+    // Handle the Discord upload in the background
     (async () => {
         try {
             const channel = await client.channels.fetch(channelId);
@@ -113,19 +93,25 @@ app.post('/api/send', upload.array('videos', 5), (req, res) => {
                 content: `**${title || 'New Video Upload'}**`,
                 files: attachments
             });
-            console.log(`Sent videos to ${channel.name}`);
+            console.log(`Successfully sent videos to ${channel.name}`);
         } catch (error) {
-            console.error('Upload Error:', error);
+            console.error('Background Upload Failed:', error);
         } finally {
             cleanupFiles(files);
         }
     })();
 });
 
-// --- START ---
-client.once('ready', () => {
-    console.log(`✅ Discord Bot logged in as ${client.user.tag}`);
-});
+// Anti-Crash logic
+process.on('unhandledRejection', (reason) => console.log('Unhandled Rejection:', reason));
+process.on('uncaughtException', (err) => console.log('Uncaught Exception:', err));
 
+// --- INITIALIZATION ---
+client.once('ready', () => console.log(`Discord Bot logged in as ${client.user.tag}`));
 client.login(DISCORD_TOKEN);
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
+const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// Increase server timeouts for large file handling
+server.keepAliveTimeout = 120000;
+server.headersTimeout = 125000;
