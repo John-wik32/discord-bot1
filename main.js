@@ -4,6 +4,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const https = require('https'); // Used for self-pinging
 
 // --- CONFIGURATION ---
 const PORT = process.env.PORT || 8000;
@@ -20,15 +21,22 @@ const client = new Client({
 
 // --- EXPRESS APP SETUP ---
 const app = express();
-const upload = multer({ dest: 'uploads/' }); // Temporary storage for uploads
+const upload = multer({ dest: 'uploads/' });
 
-// Middleware to parse JSON and serve static files
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// --- 1. FAVICON FIX (Stops the 404 error) ---
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
+// --- 2. KEEP ALIVE ENDPOINT (For Uptime Robots) ---
+app.get('/', (req, res) => {
+    res.send('Bot is running! Go to /index.html to use the dashboard.');
+});
+
 // --- ROUTES ---
 
-// 1. Get available channels (Protected)
+// Get available channels
 app.get('/api/channels', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (authHeader !== DASHBOARD_PASSWORD) {
@@ -36,7 +44,6 @@ app.get('/api/channels', async (req, res) => {
     }
 
     try {
-        // Fetch all text channels from all guilds the bot is in
         const channels = [];
         client.guilds.cache.forEach(guild => {
             guild.channels.cache.forEach(channel => {
@@ -55,11 +62,10 @@ app.get('/api/channels', async (req, res) => {
     }
 });
 
-// 2. Send Video (Protected)
+// Send Video
 app.post('/api/send', upload.array('videos', 5), async (req, res) => {
     const authHeader = req.headers.authorization;
     
-    // cleanup helper
     const cleanupFiles = (files) => {
         if (!files) return;
         files.forEach(file => fs.unlink(file.path, () => {}));
@@ -80,17 +86,13 @@ app.post('/api/send', upload.array('videos', 5), async (req, res) => {
 
     try {
         const channel = await client.channels.fetch(channelId);
-        if (!channel) {
-            throw new Error('Channel not found');
-        }
+        if (!channel) throw new Error('Channel not found');
 
-        // Prepare attachments
         const attachments = files.map(file => ({
             attachment: file.path,
             name: file.originalname
         }));
 
-        // Send to Discord
         await channel.send({
             content: `**${title || 'New Video Upload'}**`,
             files: attachments
@@ -100,11 +102,21 @@ app.post('/api/send', upload.array('videos', 5), async (req, res) => {
 
     } catch (error) {
         console.error('Error sending message:', error);
-        res.status(500).json({ error: 'Failed to send to Discord. Check file size limits or permissions.' });
+        res.status(500).json({ error: 'Failed to send to Discord.' });
     } finally {
-        // Always clean up temp files
         cleanupFiles(files);
     }
+});
+
+// --- 3. ANTI-CRASH (Prevents bot from dying on small errors) ---
+process.on('unhandledRejection', (reason, promise) => {
+    console.log('Unhandled Rejection at:', promise, 'reason:', reason);
+    // Do not exit the process
+});
+
+process.on('uncaughtException', (err) => {
+    console.log('Uncaught Exception:', err);
+    // Do not exit the process
 });
 
 // --- INITIALIZATION ---
