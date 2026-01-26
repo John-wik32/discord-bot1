@@ -3,101 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Bot Dashboard</title>
+    <title>Bot Video Dashboard</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .container { background: #2b2b3b; padding: 2rem; border-radius: 12px; width: 420px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
-        h2 { text-align: center; color: #5865F2; margin-bottom: 1.5rem; }
-        label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: #b9bbbe; }
-        input, select, button { width: 100%; padding: 12px; margin-bottom: 1.2rem; border-radius: 6px; border: none; box-sizing: border-box; font-size: 1rem; }
-        input, select { background: #181825; color: #fff; border: 1px solid #444; }
-        button { background: #5865F2; color: white; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        body { font-family: sans-serif; background: #1e1e2e; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .container { background: #2b2b3b; padding: 2rem; border-radius: 10px; width: 400px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h2 { text-align: center; margin-bottom: 1.5rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
+        input, select, button { width: 100%; padding: 10px; margin-bottom: 1rem; border-radius: 5px; border: none; box-sizing: border-box; }
+        input, select { background: #181825; color: #fff; border: 1px solid #45475a; }
+        button { background: #5865F2; color: white; cursor: pointer; font-weight: bold; transition: 0.2s; }
         button:hover { background: #4752c4; }
-        button:disabled { background: #4f545c; cursor: not-allowed; }
-        .progress-wrapper { width: 100%; background: #181825; border-radius: 10px; margin-bottom: 1rem; display: none; overflow: hidden; }
-        .progress-bar { width: 0%; height: 12px; background: #2ecc71; transition: width 0.3s; }
-        .status { text-align: center; font-size: 0.9rem; margin-top: 10px; min-height: 1.5em; }
+        button:disabled { background: #3c3c4f; cursor: not-allowed; }
+        
+        .progress-wrapper { width: 100%; background-color: #181825; border-radius: 5px; margin-bottom: 1rem; display: none; overflow: hidden; }
+        .progress-bar { width: 0%; height: 20px; background-color: #2ecc71; transition: width 0.2s; }
+        .status { text-align: center; font-size: 0.9rem; margin-top: 10px; min-height: 1.2em; white-space: pre-wrap; }
         .hidden { display: none; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Bot Dashboard</h2>
-    
+    <h2>Video Controller</h2>
     <div id="authSection">
         <label>Dashboard Password</label>
-        <input type="password" id="passwordInput" placeholder="Enter password...">
-        <button id="loginBtn" onclick="attemptLogin()">Login & Load Bot</button>
+        <input type="password" id="passwordInput" placeholder="Enter password">
+        <button onclick="attemptLogin()">Login & Load Channels</button>
     </div>
 
     <form id="uploadForm" class="hidden">
-        <label>Post to Channel</label>
-        <select id="channelSelect" required></select>
-
-        <label>Video Title</label>
-        <input type="text" id="titleInput" placeholder="Enter a title..." required>
-
-        <label>Select Videos (Max 5)</label>
+        <label>Select Channel</label>
+        <select id="channelSelect" required><option value="">-- Select a Channel --</option></select>
+        <label>Post Title</label>
+        <input type="text" id="titleInput" placeholder="Check out this video!" required>
+        <label>Upload Videos (Max 5)</label>
         <input type="file" id="fileInput" multiple accept="video/*" required>
-
-        <div class="progress-wrapper" id="progressWrapper">
-            <div class="progress-bar" id="progressBar"></div>
-        </div>
-
+        <div class="progress-wrapper" id="progressWrapper"><div class="progress-bar" id="progressBar"></div></div>
         <button type="submit" id="sendBtn">Send to Discord</button>
     </form>
-
     <div id="statusMessage" class="status"></div>
 </div>
 
 <script>
     let password = '';
+    let retryCount = 0;
 
     async function attemptLogin() {
         const passVal = document.getElementById('passwordInput').value;
         const status = document.getElementById('statusMessage');
-        const loginBtn = document.getElementById('loginBtn');
-        
-        if (!passVal) return alert("Enter password");
-
-        status.textContent = "Connecting to bot... (Waiting for wake-up)";
-        status.style.color = "#ffa500";
-        loginBtn.disabled = true;
+        status.textContent = "Connecting to bot...";
+        status.style.color = "#ccc";
 
         try {
-            const res = await fetch('/api/channels', { 
-                headers: { 'Authorization': passVal } 
-            });
+            const res = await fetch('/api/channels', { headers: { 'Authorization': passVal } });
 
-            if (res.ok) {
+            if (res.status === 200) {
+                // Success
                 const channels = await res.json();
-                const select = document.getElementById('channelSelect');
-                select.innerHTML = '';
-                channels.forEach(ch => {
-                    const opt = document.createElement('option');
-                    opt.value = ch.id;
-                    opt.textContent = ch.name;
-                    select.appendChild(opt);
-                });
-
+                populateChannels(channels);
                 password = passVal;
                 document.getElementById('authSection').classList.add('hidden');
                 document.getElementById('uploadForm').classList.remove('hidden');
-                status.textContent = "Bot Connected ✅";
-                status.style.color = "#2ecc71";
-            } else if (res.status === 504 || res.status === 503) {
-                // If it timeouts or says 503, wait 5 seconds and retry automatically
-                setTimeout(attemptLogin, 5000);
-            } else {
-                status.textContent = "Login Failed: Invalid Password";
+                status.textContent = "";
+                retryCount = 0;
+            } else if (res.status === 503) {
+                // Bot is waking up
+                retryCount++;
+                if(retryCount > 5) {
+                    status.textContent = "Bot is taking too long to wake up. Check Koyeb logs.";
+                    status.style.color = "#ff5555";
+                    return;
+                }
+                status.textContent = `Bot is waking up... Retrying (${retryCount}/5)`;
+                status.style.color = "#ffa500";
+                setTimeout(attemptLogin, 3000); // Retry after 3 seconds
+            } else if (res.status === 401) {
+                status.textContent = "Incorrect Password.";
                 status.style.color = "#ff5555";
-                loginBtn.disabled = false;
+            } else {
+                const err = await res.json();
+                status.textContent = "Error: " + (err.error || "Unknown");
+                status.style.color = "#ff5555";
             }
         } catch (e) {
-            status.textContent = "Server is starting up... retrying...";
-            setTimeout(attemptLogin, 5000);
+            status.textContent = "Network error. Is the bot running?";
+            status.style.color = "#ff5555";
         }
+    }
+
+    function populateChannels(channels) {
+        const select = document.getElementById('channelSelect');
+        select.innerHTML = '<option value="">-- Select a Channel --</option>';
+        channels.forEach(ch => {
+            const opt = document.createElement('option');
+            opt.value = ch.id;
+            opt.textContent = ch.name;
+            select.appendChild(opt);
+        });
     }
 
     document.getElementById('uploadForm').addEventListener('submit', (e) => {
@@ -111,6 +113,8 @@
         const title = document.getElementById('titleInput').value;
         const files = document.getElementById('fileInput').files;
 
+        if (!channelId || files.length === 0) return;
+
         const formData = new FormData();
         formData.append('channelId', channelId);
         formData.append('title', title);
@@ -119,7 +123,7 @@
         btn.disabled = true;
         pWrapper.style.display = 'block';
         pBar.style.width = '0%';
-        status.textContent = "Uploading to server...";
+        status.textContent = "Uploading...";
         status.style.color = "#fff";
 
         const xhr = new XMLHttpRequest();
@@ -137,25 +141,22 @@
         xhr.onload = () => {
             btn.disabled = false;
             if (xhr.status === 200) {
-                status.textContent = "✅ Uploaded! Bot is posting to Discord now.";
-                status.style.color = "#2ecc71";
+                status.textContent = "✅ Sent to queue!";
+                status.style.color = "#55ff55";
                 document.getElementById('uploadForm').reset();
-                setTimeout(() => { pWrapper.style.display = 'none'; }, 3000);
+                setTimeout(() => { pWrapper.style.display = 'none'; }, 2000);
             } else {
-                status.textContent = "Error: " + xhr.status;
+                status.textContent = "Error " + xhr.status;
                 status.style.color = "#ff5555";
             }
         };
-        
         xhr.onerror = () => {
             btn.disabled = false;
-            status.textContent = "Network Error - check file size";
+            status.textContent = "Network Error";
             status.style.color = "#ff5555";
         };
-
         xhr.send(formData);
     });
 </script>
-
 </body>
 </html>
