@@ -7,13 +7,13 @@ const fs = require('fs');
 
 // --- CONFIGURATION ---
 const PORT = process.env.PORT || 8000;
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+// Check for common typos in environment variables
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.DISCORD_TOKE || process.env.TOKEN;
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD;
 
-if (!DISCORD_TOKEN) {
-    console.error("CRITICAL ERROR: DISCORD_TOKEN is missing in environment variables.");
-    process.exit(1);
-}
+// Global status variable for debugging
+let botStatus = "STARTING";
+let lastError = null;
 
 // --- DISCORD CLIENT ---
 const client = new Client({
@@ -27,37 +27,44 @@ const upload = multer({ dest: 'uploads/' });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Fix for Favicon 404
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-// Health Check / Wake up endpoint
+// --- HEALTH / DEBUG ENDPOINT ---
 app.get('/', (req, res) => {
-    const status = client.isReady() ? 'ONLINE ✅' : 'CONNECTING ⏳';
-    res.send(`Bot Status: ${status} | Ping: ${client.ws.ping}ms`);
+    const isReady = client.isReady();
+    const tokenStatus = DISCORD_TOKEN ? `Loaded (${DISCORD_TOKEN.substring(0, 5)}...)` : "MISSING (Check Env Vars)";
+    
+    res.send(`
+        <h1>Bot Status: ${isReady ? 'ONLINE ✅' : 'OFFLINE ❌'}</h1>
+        <p><strong>Current State:</strong> ${botStatus}</p>
+        <p><strong>Token Status:</strong> ${tokenStatus}</p>
+        <p><strong>Last Error:</strong> ${lastError || 'None'}</p>
+        <hr>
+        <p><em>If "Token Status" says MISSING, check your Koyeb Environment Variables. It must be named <code>DISCORD_TOKEN</code>.</em></p>
+    `);
 });
 
 // --- API ROUTES ---
 
-// 1. Get Channels
 app.get('/api/channels', async (req, res) => {
     if (req.headers.authorization !== DASHBOARD_PASSWORD) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    // IF BOT IS OFFLINE: Don't send 503. Send a "fake" channel with the error message
+    // so the dashboard loads and you can see what is wrong.
     if (!client.isReady()) {
-        // Attempt to trigger a login retry if stuck
-        console.log("API access attempted while bot is offline. Checking connection...");
-        return res.status(503).json({ error: 'Bot is waking up... Please wait.' });
+        console.log(`[API] Bot offline. Status: ${botStatus}`);
+        return res.json([{
+            id: 'error',
+            name: `❌ BOT OFFLINE: ${botStatus} (Check / for details)`
+        }]);
     }
 
     try {
         const channels = [];
-        
-        // Force a fetch if cache is surprisingly empty (Cold Boot fix)
-        if (client.guilds.cache.size === 0) {
-            console.log("Cache empty, forcing guild fetch...");
-            await client.guilds.fetch();
-        }
+        // Force fetch if cache is empty
+        if (client.guilds.cache.size === 0) await client.guilds.fetch();
 
         client.guilds.cache.forEach(guild => {
             if (!guild) return;
@@ -72,7 +79,6 @@ app.get('/api/channels', async (req, res) => {
             });
         });
         
-        // Sort channels alphabetically for better UX
         channels.sort((a, b) => a.name.localeCompare(b.name));
         res.json(channels);
     } catch (error) {
@@ -81,7 +87,6 @@ app.get('/api/channels', async (req, res) => {
     }
 });
 
-// 2. Send Video
 app.post('/api/send', upload.array('videos', 5), (req, res) => {
     const authHeader = req.headers.authorization;
     const { channelId, title } = req.body;
@@ -89,12 +94,17 @@ app.post('/api/send', upload.array('videos', 5), (req, res) => {
 
     const cleanupFiles = (f) => { if (f) f.forEach(file => fs.unlink(file.path, () => {})); };
 
-    if (authHeader !== DASHBOARD_PASSWORD || !client.isReady()) {
+    if (authHeader !== DASHBOARD_PASSWORD) {
         cleanupFiles(files);
-        return res.status(403).json({ error: 'Forbidden or Bot Offline' });
+        return res.status(401).json({ error: 'Wrong Password' });
     }
 
-    res.json({ success: true, message: 'Upload received! Processing in background...' });
+    if (!client.isReady()) {
+        cleanupFiles(files);
+        return res.status(503).json({ error: `Bot Offline: ${botStatus}` });
+    }
+
+    res.json({ success: true, message: 'Upload received! Processing...' });
 
     (async () => {
         try {
@@ -119,34 +129,42 @@ app.post('/api/send', upload.array('videos', 5), (req, res) => {
     })();
 });
 
-// --- ROBUST LOGIN LOGIC ---
+// --- LOGIN LOGIC ---
 const startBot = async () => {
+    if (!DISCORD_TOKEN) {
+        botStatus = "CRITICAL: DISCORD_TOKEN is missing in Env Vars";
+        console.error(botStatus);
+        return;
+    }
+
     try {
-        console.log("Attempting to log in...");
+        botStatus = "Logging in...";
+        console.log(botStatus);
         await client.login(DISCORD_TOKEN);
+        botStatus = "Ready";
+        lastError = null;
     } catch (error) {
-        console.error("Login Failed:", error.message);
-        console.log("Retrying in 5 seconds...");
-        setTimeout(startBot, 5000);
+        botStatus = "Login Failed (Retrying in 10s)";
+        lastError = error.message;
+        console.error("Login Error:", error);
+        setTimeout(startBot, 10000);
     }
 };
 
-client.once('ready', () => console.log(`Discord Bot logged in as ${client.user.tag}`));
-
-// Auto-Reconnect if connection drops
-client.on('error', error => {
-    console.error("Discord Client Error:", error);
-    // Discord.js auto-reconnects, but if it fails completely, we can restart process
+client.once('ready', () => {
+    botStatus = "Ready";
+    console.log(`Discord Bot logged in as ${client.user.tag}`);
 });
 
-// Anti-Crash logic
-process.on('unhandledRejection', (reason) => console.log('Unhandled Rejection:', reason));
-process.on('uncaughtException', (err) => console.log('Uncaught Exception:', err));
+client.on('error', (err) => {
+    console.error("Client Error:", err);
+    lastError = err.message;
+});
 
-// Start Server FIRST, then Bot
+// --- SERVER START ---
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
-    startBot(); // Start bot login after server is up
+    startBot();
 });
 
 server.keepAliveTimeout = 120000;
