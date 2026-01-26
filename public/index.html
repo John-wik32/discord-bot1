@@ -3,60 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot Video Dashboard</title>
+    <title>Video Bot Dashboard</title>
     <style>
-        body { font-family: sans-serif; background: #1e1e2e; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .container { background: #2b2b3b; padding: 2rem; border-radius: 10px; width: 400px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        h2 { text-align: center; margin-bottom: 1.5rem; }
-        label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
-        input, select, button { width: 100%; padding: 10px; margin-bottom: 1rem; border-radius: 5px; border: none; box-sizing: border-box; }
-        input, select { background: #181825; color: #fff; border: 1px solid #45475a; }
-        
-        button { background: #5865F2; color: white; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .container { background: #2b2b3b; padding: 2rem; border-radius: 12px; width: 420px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+        h2 { text-align: center; color: #5865F2; margin-bottom: 1.5rem; }
+        label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: #b9bbbe; }
+        input, select, button { width: 100%; padding: 12px; margin-bottom: 1.2rem; border-radius: 6px; border: none; box-sizing: border-box; font-size: 1rem; }
+        input, select { background: #181825; color: #fff; border: 1px solid #444; }
+        button { background: #5865F2; color: white; cursor: pointer; font-weight: bold; transition: background 0.2s; }
         button:hover { background: #4752c4; }
-        button:disabled { background: #3c3c4f; cursor: not-allowed; }
-
-        /* Progress Bar Styles */
-        .progress-wrapper {
-            width: 100%;
-            background-color: #181825;
-            border-radius: 5px;
-            margin-bottom: 1rem;
-            display: none; /* Hidden by default */
-            overflow: hidden;
-        }
-        .progress-bar {
-            width: 0%;
-            height: 20px;
-            background-color: #2ecc71; /* Green */
-            transition: width 0.2s;
-        }
-
-        .status { text-align: center; font-size: 0.9rem; margin-top: 10px; min-height: 1.2em; }
+        button:disabled { background: #4f545c; cursor: not-allowed; }
+        .progress-wrapper { width: 100%; background: #181825; border-radius: 10px; margin-bottom: 1rem; display: none; overflow: hidden; }
+        .progress-bar { width: 0%; height: 12px; background: #2ecc71; transition: width 0.3s; }
+        .status { text-align: center; font-size: 0.9rem; margin-top: 10px; min-height: 1.5em; }
         .hidden { display: none; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Video Controller</h2>
+    <h2>Bot Dashboard</h2>
     
     <div id="authSection">
         <label>Dashboard Password</label>
-        <input type="password" id="passwordInput" placeholder="Enter password">
-        <button onclick="loadChannels()">Login & Load Channels</button>
+        <input type="password" id="passwordInput" placeholder="Enter password...">
+        <button id="loginBtn" onclick="attemptLogin()">Login & Load Bot</button>
     </div>
 
     <form id="uploadForm" class="hidden">
-        <label>Select Channel</label>
-        <select id="channelSelect" required>
-            <option value="">-- Select a Channel --</option>
-        </select>
+        <label>Post to Channel</label>
+        <select id="channelSelect" required></select>
 
-        <label>Post Title</label>
-        <input type="text" id="titleInput" placeholder="Check out this video!" required>
+        <label>Video Title</label>
+        <input type="text" id="titleInput" placeholder="Enter a title..." required>
 
-        <label>Upload Videos (Max 5)</label>
+        <label>Select Videos (Max 5)</label>
         <input type="file" id="fileInput" multiple accept="video/*" required>
 
         <div class="progress-wrapper" id="progressWrapper">
@@ -72,120 +54,105 @@
 <script>
     let password = '';
 
-    async function loadChannels() {
+    async function attemptLogin() {
         const passVal = document.getElementById('passwordInput').value;
         const status = document.getElementById('statusMessage');
+        const loginBtn = document.getElementById('loginBtn');
         
-        status.textContent = "Loading channels...";
-        status.style.color = "#ccc";
+        if (!passVal) return alert("Enter password");
+
+        status.textContent = "Connecting to bot... (Waiting for wake-up)";
+        status.style.color = "#ffa500";
+        loginBtn.disabled = true;
 
         try {
-            const res = await fetch('/api/channels', {
-                headers: { 'Authorization': passVal }
+            const res = await fetch('/api/channels', { 
+                headers: { 'Authorization': passVal } 
             });
 
-            if (res.status === 401) {
-                status.textContent = "Incorrect Password.";
+            if (res.ok) {
+                const channels = await res.json();
+                const select = document.getElementById('channelSelect');
+                select.innerHTML = '';
+                channels.forEach(ch => {
+                    const opt = document.createElement('option');
+                    opt.value = ch.id;
+                    opt.textContent = ch.name;
+                    select.appendChild(opt);
+                });
+
+                password = passVal;
+                document.getElementById('authSection').classList.add('hidden');
+                document.getElementById('uploadForm').classList.remove('hidden');
+                status.textContent = "Bot Connected ✅";
+                status.style.color = "#2ecc71";
+            } else if (res.status === 504 || res.status === 503) {
+                // If it timeouts or says 503, wait 5 seconds and retry automatically
+                setTimeout(attemptLogin, 5000);
+            } else {
+                status.textContent = "Login Failed: Invalid Password";
                 status.style.color = "#ff5555";
-                return;
+                loginBtn.disabled = false;
             }
-
-            const channels = await res.json();
-            const select = document.getElementById('channelSelect');
-            select.innerHTML = '<option value="">-- Select a Channel --</option>';
-            
-            channels.forEach(ch => {
-                const opt = document.createElement('option');
-                opt.value = ch.id;
-                opt.textContent = ch.name;
-                select.appendChild(opt);
-            });
-
-            password = passVal;
-            document.getElementById('authSection').classList.add('hidden');
-            document.getElementById('uploadForm').classList.remove('hidden');
-            status.textContent = "";
         } catch (e) {
-            status.textContent = "Error loading channels.";
+            status.textContent = "Server is starting up... retrying...";
+            setTimeout(attemptLogin, 5000);
         }
     }
 
     document.getElementById('uploadForm').addEventListener('submit', (e) => {
         e.preventDefault();
-        
-        // UI Elements
         const status = document.getElementById('statusMessage');
         const btn = document.getElementById('sendBtn');
-        const progressWrapper = document.getElementById('progressWrapper');
-        const progressBar = document.getElementById('progressBar');
+        const pWrapper = document.getElementById('progressWrapper');
+        const pBar = document.getElementById('progressBar');
         
-        // Data
         const channelId = document.getElementById('channelSelect').value;
         const title = document.getElementById('titleInput').value;
         const files = document.getElementById('fileInput').files;
 
-        if (!channelId || files.length === 0) {
-            status.textContent = "Please select a channel and files.";
-            return;
-        }
-
-        // Prepare Data
         const formData = new FormData();
         formData.append('channelId', channelId);
         formData.append('title', title);
-        for (let i = 0; i < files.length; i++) {
-            formData.append('videos', files[i]);
-        }
+        for (let i = 0; i < files.length; i++) formData.append('videos', files[i]);
 
-        // Reset UI for Upload
         btn.disabled = true;
-        progressWrapper.style.display = 'block';
-        progressBar.style.width = '0%';
-        status.textContent = "Starting upload...";
+        pWrapper.style.display = 'block';
+        pBar.style.width = '0%';
+        status.textContent = "Uploading to server...";
         status.style.color = "#fff";
 
-        // Create XHR Request (Better than fetch for progress)
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/api/send', true);
         xhr.setRequestHeader('Authorization', password);
 
-        // Track Upload Progress
-        xhr.upload.onprogress = function(e) {
+        xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) {
-                const percentComplete = (e.loaded / e.total) * 100;
-                progressBar.style.width = percentComplete + '%';
-                status.textContent = `Uploading: ${Math.round(percentComplete)}%`;
+                const pct = (e.loaded / e.total) * 100;
+                pBar.style.width = pct + '%';
+                status.textContent = `Uploading: ${Math.round(pct)}%`;
             }
         };
 
-        // Handle Completion
-        xhr.onload = function() {
+        xhr.onload = () => {
             btn.disabled = false;
             if (xhr.status === 200) {
-                status.textContent = "✅ Videos sent successfully!";
-                status.style.color = "#55ff55";
+                status.textContent = "✅ Uploaded! Bot is posting to Discord now.";
+                status.style.color = "#2ecc71";
                 document.getElementById('uploadForm').reset();
-                progressBar.style.width = '0%';
-                setTimeout(() => { progressWrapper.style.display = 'none'; }, 2000);
+                setTimeout(() => { pWrapper.style.display = 'none'; }, 3000);
             } else {
-                let errorMsg = "Unknown error";
-                try {
-                    const response = JSON.parse(xhr.responseText);
-                    errorMsg = response.error;
-                } catch(err) {}
-                status.textContent = "Error: " + errorMsg;
+                status.textContent = "Error: " + xhr.status;
                 status.style.color = "#ff5555";
             }
         };
-
-        // Handle Network Errors
-        xhr.onerror = function() {
+        
+        xhr.onerror = () => {
             btn.disabled = false;
-            status.textContent = "Network failure.";
+            status.textContent = "Network Error - check file size";
             status.style.color = "#ff5555";
         };
 
-        // Send
         xhr.send(formData);
     });
 </script>
