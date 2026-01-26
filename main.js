@@ -7,165 +7,143 @@ const fs = require('fs');
 
 // --- CONFIGURATION ---
 const PORT = process.env.PORT || 8000;
-// Check for common typos in environment variables
+// Support multiple variable names just in case
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.DISCORD_TOKE || process.env.TOKEN;
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD;
 
-// Global status variable for debugging
-let botStatus = "STARTING";
-let lastError = null;
+// --- LOGGING SYSTEM (Captures logs to show in Browser) ---
+const appLogs = [];
+function logToBrowser(type, message) {
+    const timestamp = new Date().toLocaleTimeString();
+    const entry = `[${timestamp}] [${type}] ${message}`;
+    console.log(entry); // Keep sending to server console
+    appLogs.unshift(entry); // Add to start of array for browser
+    if (appLogs.length > 50) appLogs.pop(); // Keep last 50 lines
+}
 
 // --- DISCORD CLIENT ---
+// We start with MINIMAL intents to rule out permission errors
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+    intents: [GatewayIntentBits.Guilds]
 });
 
-// --- EXPRESS APP SETUP ---
+// --- EXPRESS APP ---
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-// --- HEALTH / DEBUG ENDPOINT ---
+// --- 1. THE DIAGNOSTIC DASHBOARD (ROOT URL) ---
 app.get('/', (req, res) => {
     const isReady = client.isReady();
-    const tokenStatus = DISCORD_TOKEN ? `Loaded (${DISCORD_TOKEN.substring(0, 5)}...)` : "MISSING (Check Env Vars)";
+    const tokenPreview = DISCORD_TOKEN ? `${DISCORD_TOKEN.substring(0, 5)}...` : "❌ NOT FOUND";
     
-    res.send(`
-        <h1>Bot Status: ${isReady ? 'ONLINE ✅' : 'OFFLINE ❌'}</h1>
-        <p><strong>Current State:</strong> ${botStatus}</p>
-        <p><strong>Token Status:</strong> ${tokenStatus}</p>
-        <p><strong>Last Error:</strong> ${lastError || 'None'}</p>
-        <hr>
-        <p><em>If "Token Status" says MISSING, check your Koyeb Environment Variables. It must be named <code>DISCORD_TOKEN</code>.</em></p>
-    `);
+    // Check if token looks weird (common copy-paste issues)
+    let tokenWarning = "";
+    if (DISCORD_TOKEN && DISCORD_TOKEN.includes(" ")) tokenWarning = "⚠️ WARNING: Token contains spaces!";
+    if (DISCORD_TOKEN && DISCORD_TOKEN.length < 50) tokenWarning = "⚠️ WARNING: Token looks too short!";
+
+    const html = `
+    <html>
+    <head><title>Bot Diagnostics</title>
+    <meta http-equiv="refresh" content="5"> <style>
+        body { font-family: monospace; background: #111; color: #eee; padding: 20px; }
+        .box { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #444; }
+        .status-ok { color: #5f5; font-weight: bold; }
+        .status-bad { color: #f55; font-weight: bold; }
+        .log-entry { border-bottom: 1px solid #333; padding: 4px 0; }
+        .log-error { color: #f88; }
+    </style>
+    </head>
+    <body>
+        <h1>🔧 Bot Diagnostics Mode</h1>
+        
+        <div class="box">
+            <p>Bot Status: <span class="${isReady ? 'status-ok' : 'status-bad'}">${isReady ? 'ONLINE ✅' : 'OFFLINE ❌'}</span></p>
+            <p>Web Server: <span class="status-ok">Running (Port ${PORT})</span></p>
+            <p>Token Loaded: ${tokenPreview} <span style="color:yellow">${tokenWarning}</span></p>
+            ${!isReady ? '<p style="color:cyan">⏳ Waiting for Discord connection...</p>' : ''}
+        </div>
+
+        <h3>📝 Live System Logs (Auto-refreshes)</h3>
+        <div class="box">
+            ${appLogs.map(l => `<div class="log-entry ${l.includes('[ERROR]') ? 'log-error' : ''}">${l}</div>`).join('')}
+        </div>
+    </body>
+    </html>
+    `;
+    res.send(html);
 });
 
 // --- API ROUTES ---
-
 app.get('/api/channels', async (req, res) => {
-    if (req.headers.authorization !== DASHBOARD_PASSWORD) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    // IF BOT IS OFFLINE: Don't send 503. Send a "fake" channel with the error message
-    // so the dashboard loads and you can see what is wrong.
+    // If offline, return empty list instead of 503 to prevent frontend crash
     if (!client.isReady()) {
-        console.log(`[API] Bot offline. Status: ${botStatus}`);
-        return res.json([{
-            id: 'error',
-            name: `❌ BOT OFFLINE: ${botStatus} (Check / for details)`
-        }]);
+        return res.json([{ id: '0', name: '❌ BOT IS OFFLINE - CHECK DIAGNOSTICS PAGE' }]);
     }
-
+    
     try {
         const channels = [];
-        // Force fetch if cache is empty
-        if (client.guilds.cache.size === 0) await client.guilds.fetch();
-
         client.guilds.cache.forEach(guild => {
-            if (!guild) return;
             guild.channels.cache.forEach(channel => {
-                if (channel && channel.type === ChannelType.GuildText && 
-                    channel.permissionsFor(client.user)?.has('SendMessages')) {
-                    channels.push({
-                        id: channel.id,
-                        name: `${guild.name} - #${channel.name}`
-                    });
+                if (channel.type === ChannelType.GuildText) {
+                    channels.push({ id: channel.id, name: `${guild.name} - #${channel.name}` });
                 }
             });
         });
-        
-        channels.sort((a, b) => a.name.localeCompare(b.name));
         res.json(channels);
-    } catch (error) {
-        console.error("Error fetching channels:", error);
-        res.status(500).json({ error: 'Internal Server Error' });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
 app.post('/api/send', upload.array('videos', 5), (req, res) => {
-    const authHeader = req.headers.authorization;
-    const { channelId, title } = req.body;
-    const files = req.files;
+    if (req.headers.authorization !== DASHBOARD_PASSWORD) return res.status(401).json({ error: 'Wrong Password' });
+    if (!client.isReady()) return res.status(503).json({ error: 'Bot Offline' });
 
-    const cleanupFiles = (f) => { if (f) f.forEach(file => fs.unlink(file.path, () => {})); };
-
-    if (authHeader !== DASHBOARD_PASSWORD) {
-        cleanupFiles(files);
-        return res.status(401).json({ error: 'Wrong Password' });
-    }
-
-    if (!client.isReady()) {
-        cleanupFiles(files);
-        return res.status(503).json({ error: `Bot Offline: ${botStatus}` });
-    }
-
-    res.json({ success: true, message: 'Upload received! Processing...' });
-
+    res.json({ success: true, message: 'Processing...' });
+    
+    // Simplified Send Logic
     (async () => {
         try {
-            const channel = await client.channels.fetch(channelId);
-            if (!channel) throw new Error('Channel not found');
-
-            const attachments = files.map(file => ({
-                attachment: file.path,
-                name: file.originalname
-            }));
-
-            await channel.send({
-                content: `**${title || 'New Video Upload'}**`,
-                files: attachments
-            });
-            console.log(`Successfully sent videos to ${channel.name}`);
-        } catch (error) {
-            console.error('Background Upload Failed:', error);
-        } finally {
-            cleanupFiles(files);
+            const channel = await client.channels.fetch(req.body.channelId);
+            const attachments = req.files.map(f => ({ attachment: f.path, name: f.originalname }));
+            await channel.send({ content: `**${req.body.title}**`, files: attachments });
+            logToBrowser("INFO", `Sent video to ${channel.name}`);
+        } catch (e) {
+            logToBrowser("ERROR", `Upload failed: ${e.message}`);
         }
     })();
 });
 
-// --- LOGIN LOGIC ---
-const startBot = async () => {
+// --- STARTUP LOGIC ---
+client.on('ready', () => logToBrowser("SUCCESS", `Logged in as ${client.user.tag}!`));
+client.on('error', (err) => logToBrowser("ERROR", `Client Error: ${err.message}`));
+
+async function start() {
+    logToBrowser("INFO", "Server starting...");
+    
     if (!DISCORD_TOKEN) {
-        botStatus = "CRITICAL: DISCORD_TOKEN is missing in Env Vars";
-        console.error(botStatus);
+        logToBrowser("ERROR", "CRITICAL: NO TOKEN FOUND IN ENV VARS");
         return;
     }
 
     try {
-        botStatus = "Logging in...";
-        console.log(botStatus);
+        logToBrowser("INFO", "Attempting Discord Login...");
         await client.login(DISCORD_TOKEN);
-        botStatus = "Ready";
-        lastError = null;
-    } catch (error) {
-        botStatus = "Login Failed (Retrying in 10s)";
-        lastError = error.message;
-        console.error("Login Error:", error);
-        setTimeout(startBot, 10000);
+    } catch (e) {
+        logToBrowser("ERROR", `LOGIN FAILED: ${e.message}`);
+        if (e.message.includes("DisallowedIntents")) {
+            logToBrowser("ERROR", "SOLUTION: Go to Discord Dev Portal -> Bot -> Enable 'Server Members Intent'");
+        } else if (e.code === 'TokenInvalid') {
+            logToBrowser("ERROR", "SOLUTION: Your Token is invalid. Update it in Koyeb Settings.");
+        }
     }
-};
+}
 
-client.once('ready', () => {
-    botStatus = "Ready";
-    console.log(`Discord Bot logged in as ${client.user.tag}`);
+// Start Server
+app.listen(PORT, '0.0.0.0', () => {
+    start();
 });
-
-client.on('error', (err) => {
-    console.error("Client Error:", err);
-    lastError = err.message;
-});
-
-// --- SERVER START ---
-const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-    startBot();
-});
-
-server.keepAliveTimeout = 120000;
-server.headersTimeout = 125000;
