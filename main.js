@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, ChannelType } = require('discord.js');
+const { Client, GatewayIntentBits, ChannelType, PermissionsBitField } = require('discord.js');
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -9,7 +9,6 @@ const PORT = process.env.PORT || 8000;
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD;
 
-// Minimum possible intents to ensure startup
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
@@ -20,40 +19,45 @@ const upload = multer({ dest: 'uploads/' });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Root route for health check
-app.get('/', (req, res) => {
-    res.send(`System Status: ${client.ws.status === 0 ? 'Connected' : 'Connecting...'}`);
-});
-
-// --- API CHANNELS ---
+// API: Get Channels
 app.get('/api/channels', async (req, res) => {
-    if (req.headers.authorization !== DASHBOARD_PASSWORD) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (req.headers.authorization !== DASHBOARD_PASSWORD) return res.status(401).json({ error: 'Wrong Password' });
 
-    // Bypass strict ready check to prevent 503 loop
     try {
         const channels = [];
-        client.guilds.cache.forEach(guild => {
-            guild.channels.cache.forEach(channel => {
+        // Ensure we have the latest data
+        const guilds = await client.guilds.fetch();
+        
+        for (const [guildId, partialGuild] of guilds) {
+            const guild = await partialGuild.fetch();
+            const guildChannels = await guild.channels.fetch();
+            
+            guildChannels.forEach(channel => {
                 if (channel.type === ChannelType.GuildText) {
-                    channels.push({ id: channel.id, name: `${guild.name} - #${channel.name}` });
+                    // Check if bot can actually send messages here
+                    const permissions = channel.permissionsFor(client.user);
+                    if (permissions && permissions.has(PermissionsBitField.Flags.SendMessages)) {
+                        channels.push({
+                            id: channel.id,
+                            name: `${guild.name} — #${channel.name}`
+                        });
+                    }
                 }
             });
-        });
+        }
 
-        // If cache is empty but client is "connected", try a fetch
-        if (channels.length === 0 && client.ws.status === 0) {
-            return res.status(503).json({ error: 'Bot connected but loading servers... wait 5s.' });
+        if (channels.length === 0) {
+            return res.status(404).json({ error: 'No text channels found. Is the bot in a server with permissions?' });
         }
 
         res.json(channels);
     } catch (error) {
-        res.status(500).json({ error: 'Server Error' });
+        console.error("Channel Fetch Error:", error);
+        res.status(500).json({ error: 'Failed to fetch channels from Discord.' });
     }
 });
 
-// --- API SEND ---
+// API: Send Video
 app.post('/api/send', upload.array('videos', 5), (req, res) => {
     const { channelId, title, description, mention } = req.body;
     const files = req.files;
@@ -86,16 +90,10 @@ app.post('/api/send', upload.array('videos', 5), (req, res) => {
     })();
 });
 
-// --- BOT STARTUP & ERROR LOGGING ---
-client.on('ready', () => console.log(`SUCCESS: Logged in as ${client.user.tag}`));
-
-client.on('error', err => console.error('DISCORD ERROR:', err));
-
-client.login(DISCORD_TOKEN).catch(err => {
-    console.error('FATAL LOGIN ERROR:', err.message);
-    if (err.message.includes('privileges')) {
-        console.error('ACTION REQUIRED: Enable "Message Content Intent" in Discord Developer Portal.');
-    }
+client.on('ready', () => {
+    console.log(`✅ Bot Online: ${client.user.tag}`);
+    console.log(`📊 Connected to ${client.guilds.cache.size} servers.`);
 });
 
-app.listen(PORT, () => console.log(`Dashboard on port ${PORT}`));
+client.login(DISCORD_TOKEN).catch(err => console.error("Login failed:", err));
+app.listen(PORT, () => console.log(`🚀 Dashboard on port ${PORT}`));
