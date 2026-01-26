@@ -3,192 +3,83 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot Command Center</title>
+    <title>Bot Dashboard</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .container { background: #2b2b3b; padding: 2rem; border-radius: 12px; width: 420px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
-        h2 { text-align: center; color: #5865F2; margin-bottom: 1.5rem; }
-        label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: #b9bbbe; }
-        input, select, textarea, button { width: 100%; padding: 12px; margin-bottom: 1.2rem; border-radius: 6px; border: none; box-sizing: border-box; font-size: 1rem; }
-        input, select, textarea { background: #181825; color: #fff; border: 1px solid #444; }
-        textarea { resize: vertical; min-height: 80px; font-family: sans-serif; }
-        button { background: #5865F2; color: white; cursor: pointer; font-weight: bold; transition: background 0.2s; }
-        button:hover { background: #4752c4; }
-        button:disabled { background: #4f545c; cursor: not-allowed; }
-        .delete-btn { background: #ed4245; margin-top: 10px; }
-        .delete-btn:hover { background: #c03537; }
-        .progress-wrapper { width: 100%; background: #181825; border-radius: 10px; margin-bottom: 1rem; display: none; overflow: hidden; }
-        .progress-bar { width: 0%; height: 12px; background: #2ecc71; transition: width 0.3s; }
-        .status { text-align: center; font-size: 0.9rem; margin-top: 10px; min-height: 1.5em; white-space: pre-wrap; }
+        body { font-family: sans-serif; background: #1e1e2e; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .container { background: #2b2b3b; padding: 20px; border-radius: 10px; width: 380px; }
+        input, select, textarea, button { width: 100%; padding: 10px; margin-top: 10px; border-radius: 5px; border: 1px solid #444; box-sizing: border-box; }
+        button { background: #5865F2; color: #fff; font-weight: bold; cursor: pointer; border: none; }
+        .progress-bar { height: 10px; background: #2ecc71; width: 0%; transition: 0.3s; margin-top: 10px; border-radius: 5px; }
+        .status { margin-top: 15px; text-align: center; font-size: 14px; color: #ffa500; }
         .hidden { display: none; }
     </style>
 </head>
 <body>
-
-<div class="container">
-    <h2>Bot Command Center</h2>
-    
-    <div id="authSection">
-        <label>Admin Password</label>
-        <input type="password" id="passwordInput" placeholder="Enter password...">
-        <button id="loginBtn" onclick="startLogin()">Login</button>
+    <div class="container">
+        <div id="auth">
+            <input type="password" id="pass" placeholder="Password">
+            <button onclick="login()">Login</button>
+        </div>
+        <form id="dash" class="hidden">
+            <select id="chan" required></select>
+            <select id="ment"><option value="none">No Mention</option><option value="everyone">@everyone</option></select>
+            <input id="title" placeholder="Title" required>
+            <textarea id="desc" placeholder="Description"></textarea>
+            <input type="file" id="file" multiple accept="video/*" required>
+            <div id="pWrap" class="hidden"><div class="progress-bar" id="pBar"></div></div>
+            <button type="submit" id="sBtn">Send Video</button>
+        </form>
+        <div id="msg" class="status"></div>
     </div>
 
-    <form id="uploadForm" class="hidden">
-        <label>Target Channel</label>
-        <select id="channelSelect" required></select>
-
-        <label>Mention Role</label>
-        <select id="mentionSelect">
-            <option value="none">No Mention</option>
-            <option value="everyone">@everyone</option>
-            <option value="here">@here</option>
-        </select>
-
-        <label>Video Title</label>
-        <input type="text" id="titleInput" placeholder="Check this out!" required>
-
-        <label>Description (Optional)</label>
-        <textarea id="descInput" placeholder="Add details..."></textarea>
-
-        <label>Select Videos (Max 5)</label>
-        <input type="file" id="fileInput" multiple accept="video/*" required>
-
-        <div class="progress-wrapper" id="progressWrapper">
-            <div class="progress-bar" id="progressBar"></div>
-        </div>
-
-        <button type="submit" id="sendBtn">🚀 Publish to Discord</button>
-        <hr style="border: 0; border-top: 1px solid #444; margin: 20px 0;">
-        <button type="button" class="delete-btn" onclick="undoLastPost()">⚠️ Undo Last Post</button>
-    </form>
-
-    <div id="statusMessage" class="status"></div>
-</div>
-
-<script>
-    let password = '';
-    let retryCount = 0;
-
-    function startLogin() {
-        retryCount = 0;
-        attemptLogin();
-    }
-
-    async function attemptLogin() {
-        const passVal = document.getElementById('passwordInput').value;
-        const status = document.getElementById('statusMessage');
-        const loginBtn = document.getElementById('loginBtn');
-        
-        status.textContent = "Connecting to bot...";
-        status.style.color = "#ffa500";
-        loginBtn.disabled = true;
-
-        try {
-            const res = await fetch('/api/channels', { headers: { 'Authorization': passVal } });
+    <script>
+        let pw = '';
+        async function login() {
+            pw = document.getElementById('pass').value;
+            const msg = document.getElementById('msg');
+            msg.textContent = "Checking connection...";
             
-            if (res.ok) {
-                const channels = await res.json();
-                const select = document.getElementById('channelSelect');
-                select.innerHTML = '';
-                channels.forEach(ch => {
-                    const opt = document.createElement('option');
-                    opt.value = ch.id;
-                    opt.textContent = ch.name;
-                    select.appendChild(opt);
-                });
-                password = passVal;
-                document.getElementById('authSection').classList.add('hidden');
-                document.getElementById('uploadForm').classList.remove('hidden');
-                status.textContent = "Connected ✅";
-                status.style.color = "#2ecc71";
-            } else if (res.status === 503 || res.status === 504) {
-                // Bot is still waking up
-                retryCount++;
-                if (retryCount > 5) {
-                    status.textContent = "❌ Bot is Offline.\nCheck Koyeb Logs for errors.";
-                    status.style.color = "#ff5555";
-                    loginBtn.disabled = false;
+            try {
+                const res = await fetch('/api/channels', { headers: {'Authorization': pw} });
+                if (res.ok) {
+                    const data = await res.json();
+                    const sel = document.getElementById('chan');
+                    data.forEach(c => sel.innerHTML += `<option value="${c.id}">${c.name}</option>`);
+                    document.getElementById('auth').classList.add('hidden');
+                    document.getElementById('dash').classList.remove('hidden');
+                    msg.textContent = "Connected!";
                 } else {
-                    status.textContent = `Bot waking up... (Attempt ${retryCount}/5)`;
-                    setTimeout(attemptLogin, 3000);
+                    const err = await res.json();
+                    msg.textContent = err.error || "Login Failed";
+                    if(res.status === 503) setTimeout(login, 4000);
                 }
-            } else {
-                status.textContent = "Invalid Password";
-                status.style.color = "#ff5555";
-                loginBtn.disabled = false;
-            }
-        } catch (e) {
-            status.textContent = "Server connection failed.";
-            loginBtn.disabled = false;
+            } catch (e) { msg.textContent = "Bot Starting..."; setTimeout(login, 4000); }
         }
-    }
 
-    // UPLOAD
-    document.getElementById('uploadForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const status = document.getElementById('statusMessage');
-        const btn = document.getElementById('sendBtn');
-        const pBar = document.getElementById('progressBar');
-        const pWrapper = document.getElementById('progressWrapper');
-        
-        const formData = new FormData();
-        formData.append('channelId', document.getElementById('channelSelect').value);
-        formData.append('title', document.getElementById('titleInput').value);
-        formData.append('description', document.getElementById('descInput').value);
-        formData.append('mention', document.getElementById('mentionSelect').value);
-        const files = document.getElementById('fileInput').files;
-        for (let i = 0; i < files.length; i++) formData.append('videos', files[i]);
+        document.getElementById('dash').onsubmit = async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('sBtn');
+            const pBar = document.getElementById('pBar');
+            const pWrap = document.getElementById('pWrap');
+            const fd = new FormData();
+            fd.append('channelId', document.getElementById('chan').value);
+            fd.append('title', document.getElementById('title').value);
+            fd.append('description', document.getElementById('desc').value);
+            fd.append('mention', document.getElementById('ment').value);
+            const files = document.getElementById('file').files;
+            for(let f of files) fd.append('videos', f);
 
-        btn.disabled = true;
-        pWrapper.style.display = 'block';
-        pBar.style.width = '0%';
-        status.textContent = "Uploading...";
-        status.style.color = "#fff";
-
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/send', true);
-        xhr.setRequestHeader('Authorization', password);
-
-        xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-                const pct = (e.loaded / e.total) * 100;
-                pBar.style.width = pct + '%';
-            }
+            btn.disabled = true; pWrap.classList.remove('hidden');
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/send');
+            xhr.setRequestHeader('Authorization', pw);
+            xhr.upload.onprogress = (e) => pBar.style.width = (e.loaded/e.total)*100 + '%';
+            xhr.onload = () => {
+                document.getElementById('msg').textContent = "Uploaded!";
+                btn.disabled = false; pWrap.classList.add('hidden');
+            };
+            xhr.send(fd);
         };
-
-        xhr.onload = () => {
-            btn.disabled = false;
-            if (xhr.status === 200) {
-                status.textContent = "✅ Success! Bot is posting now.";
-                status.style.color = "#2ecc71";
-                document.getElementById('uploadForm').reset();
-                setTimeout(() => { pWrapper.style.display = 'none'; }, 3000);
-            } else {
-                status.textContent = "Error: " + xhr.status;
-                status.style.color = "#ff5555";
-            }
-        };
-        xhr.send(formData);
-    });
-
-    // UNDO
-    async function undoLastPost() {
-        if (!confirm("Delete last bot message?")) return;
-        const channelId = document.getElementById('channelSelect').value;
-        const status = document.getElementById('statusMessage');
-        
-        status.textContent = "Deleting...";
-        try {
-            const res = await fetch('/api/delete-last', {
-                method: 'POST',
-                headers: { 'Authorization': password, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ channelId })
-            });
-            if (res.ok) status.textContent = "✅ Deleted.";
-            else status.textContent = "❌ Failed to delete.";
-        } catch (e) { status.textContent = "Network Error"; }
-    }
-</script>
+    </script>
 </body>
 </html>
