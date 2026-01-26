@@ -10,6 +10,11 @@ const PORT = process.env.PORT || 8000;
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD;
 
+if (!DISCORD_TOKEN) {
+    console.error("CRITICAL ERROR: DISCORD_TOKEN is missing in environment variables.");
+    process.exit(1);
+}
+
 // --- DISCORD CLIENT ---
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
@@ -27,27 +32,37 @@ app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // Health Check / Wake up endpoint
 app.get('/', (req, res) => {
-    res.send(`Bot Status: ${client.isReady() ? 'ONLINE ✅' : 'CONNECTING ⏳'}`);
+    const status = client.isReady() ? 'ONLINE ✅' : 'CONNECTING ⏳';
+    res.send(`Bot Status: ${status} | Ping: ${client.ws.ping}ms`);
 });
 
 // --- API ROUTES ---
 
-// 1. Get Channels (Optimized for speed)
-app.get('/api/channels', (req, res) => {
+// 1. Get Channels
+app.get('/api/channels', async (req, res) => {
     if (req.headers.authorization !== DASHBOARD_PASSWORD) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
     if (!client.isReady()) {
-        return res.status(503).json({ error: 'Bot is waking up...' });
+        // Attempt to trigger a login retry if stuck
+        console.log("API access attempted while bot is offline. Checking connection...");
+        return res.status(503).json({ error: 'Bot is waking up... Please wait.' });
     }
 
     try {
         const channels = [];
-        // Use cache only for instant response to avoid 504 timeouts
+        
+        // Force a fetch if cache is surprisingly empty (Cold Boot fix)
+        if (client.guilds.cache.size === 0) {
+            console.log("Cache empty, forcing guild fetch...");
+            await client.guilds.fetch();
+        }
+
         client.guilds.cache.forEach(guild => {
+            if (!guild) return;
             guild.channels.cache.forEach(channel => {
-                if (channel.type === ChannelType.GuildText && 
+                if (channel && channel.type === ChannelType.GuildText && 
                     channel.permissionsFor(client.user)?.has('SendMessages')) {
                     channels.push({
                         id: channel.id,
@@ -56,13 +71,17 @@ app.get('/api/channels', (req, res) => {
                 }
             });
         });
+        
+        // Sort channels alphabetically for better UX
+        channels.sort((a, b) => a.name.localeCompare(b.name));
         res.json(channels);
     } catch (error) {
+        console.error("Error fetching channels:", error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 
-// 2. Send Video (Fire-and-Forget to prevent Gateway Timeouts)
+// 2. Send Video
 app.post('/api/send', upload.array('videos', 5), (req, res) => {
     const authHeader = req.headers.authorization;
     const { channelId, title } = req.body;
@@ -75,10 +94,8 @@ app.post('/api/send', upload.array('videos', 5), (req, res) => {
         return res.status(403).json({ error: 'Forbidden or Bot Offline' });
     }
 
-    // RESPOND IMMEDIATELY to prevent the 504 error
     res.json({ success: true, message: 'Upload received! Processing in background...' });
 
-    // Handle the Discord upload in the background
     (async () => {
         try {
             const channel = await client.channels.fetch(channelId);
@@ -102,16 +119,35 @@ app.post('/api/send', upload.array('videos', 5), (req, res) => {
     })();
 });
 
+// --- ROBUST LOGIN LOGIC ---
+const startBot = async () => {
+    try {
+        console.log("Attempting to log in...");
+        await client.login(DISCORD_TOKEN);
+    } catch (error) {
+        console.error("Login Failed:", error.message);
+        console.log("Retrying in 5 seconds...");
+        setTimeout(startBot, 5000);
+    }
+};
+
+client.once('ready', () => console.log(`Discord Bot logged in as ${client.user.tag}`));
+
+// Auto-Reconnect if connection drops
+client.on('error', error => {
+    console.error("Discord Client Error:", error);
+    // Discord.js auto-reconnects, but if it fails completely, we can restart process
+});
+
 // Anti-Crash logic
 process.on('unhandledRejection', (reason) => console.log('Unhandled Rejection:', reason));
 process.on('uncaughtException', (err) => console.log('Uncaught Exception:', err));
 
-// --- INITIALIZATION ---
-client.once('ready', () => console.log(`Discord Bot logged in as ${client.user.tag}`));
-client.login(DISCORD_TOKEN);
+// Start Server FIRST, then Bot
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+    startBot(); // Start bot login after server is up
+});
 
-const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-// Increase server timeouts for large file handling
 server.keepAliveTimeout = 120000;
 server.headersTimeout = 125000;
