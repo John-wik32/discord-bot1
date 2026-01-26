@@ -3,81 +3,216 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot Dashboard</title>
+    <title>Media Commander</title>
     <style>
-        body { font-family: sans-serif; background: #1e1e2e; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .container { background: #2b2b3b; padding: 20px; border-radius: 10px; width: 380px; }
-        input, select, textarea, button { width: 100%; padding: 10px; margin-top: 10px; border-radius: 5px; border: 1px solid #444; box-sizing: border-box; }
-        button { background: #5865F2; color: #fff; font-weight: bold; cursor: pointer; border: none; }
-        .progress-bar { height: 10px; background: #2ecc71; width: 0%; transition: 0.3s; margin-top: 10px; border-radius: 5px; }
-        .status { margin-top: 15px; text-align: center; font-size: 14px; color: #ffa500; }
+        :root {
+            --bg: #0f0f13;
+            --card: #16161e;
+            --input: #1f1f29;
+            --accent: #7aa2f7;
+            --text: #c0caf5;
+            --muted: #565f89;
+            --success: #9ece6a;
+            --error: #f7768e;
+        }
+
+        body { 
+            font-family: 'Inter', system-ui, sans-serif; 
+            background: var(--bg); 
+            color: var(--text); 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+            margin: 0; 
+        }
+
+        .container { 
+            background: var(--card); 
+            padding: 2rem; 
+            border-radius: 16px; 
+            width: 100%; 
+            max-width: 400px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border: 1px solid #292e42;
+        }
+
+        h2 { text-align: center; color: var(--accent); margin-top: 0; }
+
+        label { display: block; margin: 10px 0 5px; font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+
+        input, select, textarea, button { 
+            width: 100%; 
+            padding: 12px; 
+            margin-top: 5px; 
+            border-radius: 8px; 
+            border: 1px solid #292e42; 
+            background: var(--input); 
+            color: var(--text); 
+            box-sizing: border-box; 
+            font-size: 1rem;
+        }
+
+        textarea { resize: none; height: 80px; }
+
+        button { 
+            background: var(--accent); 
+            color: var(--bg); 
+            font-weight: 700; 
+            cursor: pointer; 
+            border: none; 
+            margin-top: 20px;
+            transition: transform 0.1s, opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:active { transform: scale(0.98); }
+        button:disabled { background: var(--muted); cursor: not-allowed; }
+
+        .progress-container { height: 6px; background: #1a1b26; border-radius: 10px; margin-top: 15px; overflow: hidden; display: none; }
+        .progress-bar { height: 100%; background: var(--success); width: 0%; transition: 0.3s; }
+
+        .status-box { 
+            margin-top: 20px; 
+            text-align: center; 
+            font-size: 0.9rem; 
+            padding: 10px;
+            border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+        }
+
         .hidden { display: none; }
+        ::placeholder { color: #414868; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div id="auth">
-            <input type="password" id="pass" placeholder="Password">
-            <button onclick="login()">Login</button>
+        <h2>Commander</h2>
+        
+        <div id="authSection">
+            <label>ACCESS KEY</label>
+            <input type="password" id="authKey" placeholder="••••••••">
+            <button onclick="handleLogin()">Unlock Dashboard</button>
         </div>
-        <form id="dash" class="hidden">
-            <select id="chan" required></select>
-            <select id="ment"><option value="none">No Mention</option><option value="everyone">@everyone</option></select>
-            <input id="title" placeholder="Title" required>
-            <textarea id="desc" placeholder="Description"></textarea>
-            <input type="file" id="file" multiple accept="video/*" required>
-            <div id="pWrap" class="hidden"><div class="progress-bar" id="pBar"></div></div>
-            <button type="submit" id="sBtn">Send Video</button>
+
+        <form id="mainDash" class="hidden">
+            <label>DESTINATION CHANNEL</label>
+            <select id="channelList" required>
+                <option value="" disabled selected>Select a channel...</option>
+            </select>
+
+            <label>ANNOUNCEMENT TYPE</label>
+            <select id="mentionType">
+                <option value="none">No Mention</option>
+                <option value="everyone">@everyone</option>
+                <option value="here">@here</option>
+            </select>
+
+            <label>POST TITLE</label>
+            <input id="postTitle" placeholder="Enter headline..." required>
+
+            <label>DESCRIPTION (OPTIONAL)</label>
+            <textarea id="postDesc" placeholder="Write something cool..."></textarea>
+
+            <label>VIDEO FILES</label>
+            <input type="file" id="videoFiles" multiple accept="video/*" required>
+
+            <div class="progress-container" id="pContainer">
+                <div class="progress-bar" id="pBar"></div>
+            </div>
+
+            <button type="submit" id="submitBtn">Deploy to Discord</button>
         </form>
-        <div id="msg" class="status"></div>
+
+        <div id="statusMsg" class="status-box">Waiting for connection...</div>
     </div>
 
     <script>
-        let pw = '';
-        async function login() {
-            pw = document.getElementById('pass').value;
-            const msg = document.getElementById('msg');
-            msg.textContent = "Checking connection...";
+        let sessionKey = '';
+
+        async function handleLogin() {
+            sessionKey = document.getElementById('authKey').value;
+            const msg = document.getElementById('statusMsg');
             
+            msg.textContent = "🔍 Fetching server data...";
+            msg.style.color = "var(--accent)";
+
             try {
-                const res = await fetch('/api/channels', { headers: {'Authorization': pw} });
+                const res = await fetch('/api/channels', { 
+                    headers: { 'Authorization': sessionKey } 
+                });
+
                 if (res.ok) {
-                    const data = await res.json();
-                    const sel = document.getElementById('chan');
-                    data.forEach(c => sel.innerHTML += `<option value="${c.id}">${c.name}</option>`);
-                    document.getElementById('auth').classList.add('hidden');
-                    document.getElementById('dash').classList.remove('hidden');
-                    msg.textContent = "Connected!";
+                    const channels = await res.json();
+                    const select = document.getElementById('channelList');
+                    select.innerHTML = '<option value="" disabled selected>Select a channel...</option>';
+                    channels.forEach(c => {
+                        const opt = document.createElement('option');
+                        opt.value = c.id;
+                        opt.textContent = c.name;
+                        select.appendChild(opt);
+                    });
+
+                    document.getElementById('authSection').classList.add('hidden');
+                    document.getElementById('mainDash').classList.remove('hidden');
+                    msg.textContent = "✅ System Ready";
+                    msg.style.color = "var(--success)";
                 } else {
-                    const err = await res.json();
-                    msg.textContent = err.error || "Login Failed";
-                    if(res.status === 503) setTimeout(login, 4000);
+                    const data = await res.json();
+                    msg.textContent = "❌ " + (data.error || "Access Denied");
+                    msg.style.color = "var(--error)";
                 }
-            } catch (e) { msg.textContent = "Bot Starting..."; setTimeout(login, 4000); }
+            } catch (e) {
+                msg.textContent = "📡 Bot is still waking up... retrying.";
+                setTimeout(handleLogin, 3000);
+            }
         }
 
-        document.getElementById('dash').onsubmit = async (e) => {
+        document.getElementById('mainDash').onsubmit = async (e) => {
             e.preventDefault();
-            const btn = document.getElementById('sBtn');
+            const btn = document.getElementById('submitBtn');
             const pBar = document.getElementById('pBar');
-            const pWrap = document.getElementById('pWrap');
+            const pCont = document.getElementById('pContainer');
+            const msg = document.getElementById('statusMsg');
+
             const fd = new FormData();
-            fd.append('channelId', document.getElementById('chan').value);
-            fd.append('title', document.getElementById('title').value);
-            fd.append('description', document.getElementById('desc').value);
-            fd.append('mention', document.getElementById('ment').value);
-            const files = document.getElementById('file').files;
+            fd.append('channelId', document.getElementById('channelList').value);
+            fd.append('title', document.getElementById('postTitle').value);
+            fd.append('description', document.getElementById('postDesc').value);
+            fd.append('mention', document.getElementById('mentionType').value);
+            
+            const files = document.getElementById('videoFiles').files;
             for(let f of files) fd.append('videos', f);
 
-            btn.disabled = true; pWrap.classList.remove('hidden');
+            btn.disabled = true;
+            pCont.style.display = 'block';
+            msg.textContent = "🚀 Uploading media...";
+
             const xhr = new XMLHttpRequest();
             xhr.open('POST', '/api/send');
-            xhr.setRequestHeader('Authorization', pw);
-            xhr.upload.onprogress = (e) => pBar.style.width = (e.loaded/e.total)*100 + '%';
-            xhr.onload = () => {
-                document.getElementById('msg').textContent = "Uploaded!";
-                btn.disabled = false; pWrap.classList.add('hidden');
+            xhr.setRequestHeader('Authorization', sessionKey);
+
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const pct = (e.loaded / e.total) * 100;
+                    pBar.style.width = pct + '%';
+                }
             };
+
+            xhr.onload = () => {
+                msg.textContent = "✨ Post sent successfully!";
+                msg.style.color = "var(--success)";
+                btn.disabled = false;
+                document.getElementById('mainDash').reset();
+                setTimeout(() => { pCont.style.display = 'none'; }, 3000);
+            };
+
+            xhr.onerror = () => {
+                msg.textContent = "💥 Network Error";
+                msg.style.color = "var(--error)";
+                btn.disabled = false;
+            };
+
             xhr.send(fd);
         };
     </script>
